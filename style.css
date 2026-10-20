@@ -62,7 +62,7 @@ kbd { display: inline-block; min-width: 1.6em; padding: 0 .35em; margin: 0 .12em
 
 #bottom { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: flex-end; gap: 14px; }
 #tools { display: flex; gap: 6px; }
-.slot { padding: 5px 10px; border-radius: 10px; background: var(--chip); border: 1px solid var(--chip-line); font-size: 14px; color: var(--ink); }
+.slot { white-space: nowrap; padding: 5px 10px; border-radius: 10px; background: var(--chip); border: 1px solid var(--chip-line); font-size: 14px; color: var(--ink); }
 .slot kbd { margin-right: 6px; font-size: 11px; }
 .slot.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(217,130,43,.35); font-weight: 600; }
 .slot.locked { opacity: .55; }

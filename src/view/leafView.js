@@ -54,29 +54,45 @@ function addInstanceAttributes(geo, n) {
   geo.setAttribute('aCurl', new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3));
 }
 
+// общий кусок шейдера: смещение UV в клетку атласа и изгиб листа
+function injectLeaf(shader, withNormal) {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', `#include <common>
+      attribute vec2 aUvOffset;
+      attribute vec3 aCurl;
+      float leafBend(vec3 p) {
+        float zt = min(p.z, 0.0), zb = max(p.z, 0.0);
+        return aCurl.x * p.x * p.x + aCurl.y * zt * zt + 0.35 * aCurl.y * zb * zb + aCurl.z * p.x * p.z;
+      }`)
+    .replace('#include <uv_vertex>', `#include <uv_vertex>
+      #ifdef USE_MAP
+        vMapUv = uv + aUvOffset;
+      #endif
+      #ifdef USE_ALPHAMAP
+        vAlphaMapUv = uv + aUvOffset;
+      #endif`)
+    .replace('#include <begin_vertex>', `vec3 transformed = vec3(position);
+      transformed.y += leafBend(position);`);
+  if (withNormal) {
+    shader.vertexShader = shader.vertexShader.replace('#include <beginnormal_vertex>', `
+      float zt0 = min(position.z, 0.0), zb0 = max(position.z, 0.0);
+      float dydx = 2.0 * aCurl.x * position.x + aCurl.z * position.z;
+      float dydz = 2.0 * aCurl.y * zt0 + 0.7 * aCurl.y * zb0 + aCurl.z * position.x;
+      vec3 objectNormal = normalize(vec3(-dydx, 1.0, -dydz));`);
+  }
+}
+
+/** Тень в форме листа: глубина с той же маской прозрачности и тем же изгибом. */
+function leafDepthMaterial({ alphaMap }) {
+  const mat = new THREE.MeshDepthMaterial({ alphaMap, alphaTest: 0.5, depthPacking: THREE.RGBADepthPacking });
+  mat.onBeforeCompile = (shader) => injectLeaf(shader, false);
+  return mat;
+}
+
 /** Материал с изгибом листа: y = cup·x² + tip·z² (к кончику, −Z) + twist·x·z. */
 function leafMaterial({ map, alphaMap }) {
   const mat = new THREE.MeshLambertMaterial({ map, alphaMap, alphaTest: 0.5, side: THREE.DoubleSide, alphaToCoverage: true });
-  mat.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>
-        attribute vec2 aUvOffset;
-        attribute vec3 aCurl;
-        float leafBend(vec3 p) {
-          float zt = min(p.z, 0.0), zb = max(p.z, 0.0);
-          return aCurl.x * p.x * p.x + aCurl.y * zt * zt + 0.35 * aCurl.y * zb * zb + aCurl.z * p.x * p.z;
-        }`)
-      .replace('#include <uv_vertex>', `#include <uv_vertex>
-        vMapUv = uv + aUvOffset;
-        vAlphaMapUv = uv + aUvOffset;`)
-      .replace('#include <beginnormal_vertex>', `
-        float zt0 = min(position.z, 0.0), zb0 = max(position.z, 0.0);
-        float dydx = 2.0 * aCurl.x * position.x + aCurl.z * position.z;
-        float dydz = 2.0 * aCurl.y * zt0 + 0.7 * aCurl.y * zb0 + aCurl.z * position.x;
-        vec3 objectNormal = normalize(vec3(-dydx, 1.0, -dydz));`)
-      .replace('#include <begin_vertex>', `vec3 transformed = vec3(position);
-        transformed.y += leafBend(position);`);
-  };
+  mat.onBeforeCompile = (shader) => injectLeaf(shader, true);
   return mat;
 }
 
@@ -90,6 +106,9 @@ export class LeafView {
     addInstanceAttributes(geo, n);
     this.mesh = new THREE.InstancedMesh(geo, this.material, n);
     this.mesh.receiveShadow = true;
+    // листья отбрасывают тени по своей форме (маска прозрачности), а не квадратами
+    this.mesh.castShadow = true;
+    this.mesh.customDepthMaterial = leafDepthMaterial(textures);
     this.mesh.frustumCulled = false;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     scene.add(this.mesh);
@@ -107,9 +126,9 @@ export class LeafView {
       uvo[i * 2 + 1] = (ATLAS_ROWS - 1 - row) / ATLAS_ROWS;
       const b = field.bend[i];
       const h1 = (b & 15) / 15, h2 = ((b >> 4) & 15) / 15;
-      curl[i * 3] = 0.12 + 0.34 * h1;            // края приподняты
-      curl[i * 3 + 1] = -0.05 + 0.55 * h2;       // кончик загнут
-      curl[i * 3 + 2] = (rng() - 0.5) * 0.35;    // лёгкое скручивание
+      curl[i * 3] = 0.15 + 0.45 * h1;            // края приподняты
+      curl[i * 3 + 1] = -0.05 + 0.7 * h2;        // кончик загнут
+      curl[i * 3 + 2] = (rng() - 0.5) * 0.45;    // лёгкое скручивание
       // нижние слои темнее — мягкая «тень» внутри ковра без карты теней
       const depth = Math.min(1, field.lift[i] / liftRef);
       const k = (0.62 + 0.38 * depth) * (0.93 + rng() * 0.12);

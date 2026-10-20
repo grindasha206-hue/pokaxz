@@ -11,6 +11,13 @@ export const SOLD = 2;
 export const SHAPES = 6;        // виды листьев — клетки атласа текстур
 export const PALETTE_SIZE = 4;  // лёгкие сдвиги оттенка
 
+// доли видов: больше жёлтых и охристых, меньше бурых и медных
+const SPECIES_WEIGHTS = [0.22, 0.17, 0.2, 0.11, 0.19, 0.11];
+function pickSpecies(r) {
+  for (let k = 0; k < SPECIES_WEIGHTS.length; k++) { r -= SPECIES_WEIGHTS[k]; if (r <= 0) return k; }
+  return SPECIES_WEIGHTS.length - 1;
+}
+
 // Минимальный отступ листа от препятствий и забора (для двора; у уровня свой).
 export const LEAF_MARGIN = 0.14;
 
@@ -151,8 +158,8 @@ export function generateLeaves(seed, count) {
     f.yaw[i] = rng() * Math.PI * 2;
     if (L.carpet) {
       // ковёр: листья лежат слоями, толщина слоя растёт с плотностью
-      f.tiltX[i] = (rng() - 0.5) * 0.4;
-      f.tiltZ[i] = (rng() - 0.5) * 0.4;
+      f.tiltX[i] = (rng() - 0.5) * 0.5;
+      f.tiltZ[i] = (rng() - 0.5) * 0.5;
       f.lift[i] = 0.004 + rng() * Math.min(0.05, 0.011 * d);
       f.scale[i] = 0.75 + rng() * 0.5;
     } else {
@@ -161,7 +168,7 @@ export function generateLeaves(seed, count) {
       f.lift[i] = 0.012 + (i % 23) * 0.0016 + rng() * 0.001;
       f.scale[i] = 0.75 + rng() * 0.55;
     }
-    f.shape[i] = Math.floor(rng() * SHAPES);
+    f.shape[i] = pickSpecies(rng());
     f.bend[i] = Math.floor(rng() * 256);
     f.color[i] = Math.floor(rng() * PALETTE_SIZE);
     f.state[i] = ON_GROUND;

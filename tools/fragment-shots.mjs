@@ -24,17 +24,17 @@ await page.evaluate(() => window.__dvor.view(-2.4, 2.6, -0.72, -0.42));
 await shot('f1-far');
 await page.evaluate(() => window.__dvor.view(-0.6, 1.4, -0.5, -0.75));
 await shot('f2-mid');
-await page.evaluate(() => window.__dvor.view(0.4, 0.2, 0.3, -1.12));
+await page.evaluate(() => window.__dvor.view(0.4, 0.4, 0.3, -1.25));
 await shot('f3-close');
-// подбор: дрожание листа под прицелом, затем полёт к камере
+// подбор: лист под прицелом дрожит и приподнимается, затем летит к камере
 await page.waitForFunction(() => window.__dvor.hover() >= 0, null, { timeout: 60000 });
 await page.evaluate(() => { window.__dvor.startPick(); });
 await page.waitForTimeout(200);
-await page.evaluate(() => window.__dvor.setPickProgress(0.8));
-await shot('f4-pick', 200);
-await page.evaluate(() => window.__dvor.setPickProgress(1));
+await page.evaluate(() => window.__dvor.setPickProgress(0.85));
+await shot('f4-pick', 300);
+await page.evaluate(() => { window.__dvor.slowmo(0.6); window.__dvor.setPickProgress(1); });
 await page.waitForFunction(() => window.__dvor.economy.inBag > 0, null, { timeout: 60000 });
-await page.evaluate(() => window.__dvor.slowmo(0.06)); // замедляем время, чтобы поймать полёт
-await shot('f5-flight', 2500);
+await shot('f5-flight', 2000);
+await shot('f6-flight-late', 3000);
 console.log(errors.length ? errors.join('\n') : 'no errors');
 await browser.close();
