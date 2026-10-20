@@ -1,11 +1,11 @@
-// Окружение первого участка: свет, небо, дом с крыльцом, забор, дерево, садовые предметы,
-// контейнер, стол с блокнотом улучшений и видимая за забором следующая часть двора.
+// Двор: свет, небо, дом с крыльцом, высокий дощатый забор, дерево, садовые предметы,
+// контейнер и стол с блокнотом улучшений. За забором — крыши соседей и сад.
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { ZONE } from '../config.js';
-import { CONTAINER, SHOP, TREE, PORCH, PORCH_STEP, GARDEN_GATE, T as FENCE_T } from '../layout.js';
+import { CONTAINER, SHOP, TREE, PORCH, PORCH_STEP, GARDEN_GATE, T as FENCE_T, FENCE_H } from '../layout.js';
 import { mulberry32 } from '../leaves.js';
-import { grassTexture, plasterTexture, woodTexture, roofTexture, signTexture } from './textures.js';
+import { grassTexture, plasterTexture, woodTexture, roofTexture, signTexture, boardTexture, barkTexture } from './textures.js';
 
 const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
 
@@ -38,18 +38,21 @@ export function buildWorld(scene) {
   MAT.roof.map.repeat.set(4, 3);
 
   // ── свет и небо ──────────────────────────────────────────────
+  // солнечный осенний день: низкое тёплое солнце даёт мягкие тени, по которым читаются
+  // перекрытия и изгибы листьев; заполняющий свет слабее, чтобы не «сплющивать» картинку
   scene.background = new THREE.Color('#bcd6ee');
-  scene.fog = new THREE.Fog('#eadfc8', 38, 140);
-  const hemi = new THREE.HemisphereLight('#dbe8ff', '#a08259', 1.35);
+  scene.fog = new THREE.Fog('#e8dcc4', 30, 120);
+  const hemi = new THREE.HemisphereLight('#d6e4ff', '#8a6e4a', 0.95);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight('#ffe1b5', 2.6);
-  sun.position.set(-9, 15, 11);
-  sun.target.position.set(0, 0, -2);
+  const sun = new THREE.DirectionalLight('#ffd9a8', 3.1);
+  sun.position.set(-11, 10, 8);
+  sun.target.position.set(0, 0, -1);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  Object.assign(sun.shadow.camera, { left: -22, right: 22, top: 22, bottom: -22, near: 1, far: 60 });
-  sun.shadow.bias = -0.0004;
-  sun.shadow.normalBias = 0.025;
+  // теневая камера охватывает только двор — так у листьев чёткие тени (≈1,3 см на пиксель)
+  Object.assign(sun.shadow.camera, { left: -13, right: 13, top: 13, bottom: -13, near: 1, far: 50 });
+  sun.shadow.bias = -0.0003;
+  sun.shadow.normalBias = 0.015;
   sun.shadow.radius = 3;
   scene.add(sun, sun.target);
   refs.sun = sun;
@@ -65,7 +68,7 @@ export function buildWorld(scene) {
 
   buildHouse(scene, MAT);
   buildFence(scene, MAT, refs);
-  buildTree(scene, TREE.x, TREE.z, 1, ['#e39a2d', '#d4762a', '#eab845', '#c95f2c'], 21);
+  buildTree(scene, TREE.x, TREE.z, 1.15, 21);
   buildYardProps(scene, MAT);
   refs.container = buildContainer(scene, MAT);
   refs.shop = buildShop(scene, MAT);
@@ -161,109 +164,135 @@ function buildHouse(scene, MAT) {
 }
 
 // ── забор ─────────────────────────────────────────────────────
-function picketGeometry() {
-  const s = new THREE.Shape();
-  const w = 0.09, h = 1.1;
-  s.moveTo(-w / 2, 0); s.lineTo(w / 2, 0); s.lineTo(w / 2, h - 0.07); s.lineTo(0, h); s.lineTo(-w / 2, h - 0.07); s.closePath();
-  const geo = new THREE.ExtrudeGeometry(s, { depth: 0.025, bevelEnabled: false });
-  geo.translate(0, 0, -0.0125);
-  return geo;
-}
-
+// Высокий дощатый забор: вертикальные доски с текстурой волокон, столбы и прожилины.
+// С уровня глаз за ним не видно пустого поля — только крыши соседей и верхушки деревьев.
 function buildFence(scene, MAT, refs) {
-  const segs = [];
   const { minX, maxX, minZ, maxZ } = ZONE;
-  // [x0,z0,x1,z1, разрывы вдоль отрезка]
-  segs.push([minX, maxZ, -0.9, maxZ], [0.9, maxZ, maxX, maxZ]);           // южный, с калиткой
-  segs.push([minX, minZ, minX, maxZ]);                                       // западный
-  segs.push([maxX, minZ, maxX, GARDEN_GATE.z0], [maxX, GARDEN_GATE.z1, maxX, maxZ]); // восточный, с воротами в сад
-  segs.push([minX, minZ, -6.5, minZ], [6.5, minZ, maxX, minZ]);             // у дома
-  const pickets = [];
-  const rails = new THREE.Group();
-  const addRun = (x0, z0, x1, z1) => {
+  const H = FENCE_H;
+  const runs = [
+    [minX, maxZ, -0.9, maxZ], [0.9, maxZ, maxX, maxZ],                       // юг, с калиткой
+    [minX, minZ, minX, maxZ],                                                  // запад
+    [maxX, minZ, maxX, GARDEN_GATE.z0], [maxX, GARDEN_GATE.z1, maxX, maxZ],   // восток, ворота в сад
+    [minX, minZ, -6.5, minZ], [6.5, minZ, maxX, minZ],                         // у дома
+    [-0.9, maxZ + 0.02, 0.9, maxZ + 0.02],                                     // калитка (закрыта)
+  ];
+  const boards = [], rng = mulberry32(31);
+  const frame = new THREE.Group();
+  const addRun = (x0, z0, x1, z1, h = H) => {
     const len = Math.hypot(x1 - x0, z1 - z0), ang = Math.atan2(x1 - x0, z1 - z0);
-    const n = Math.max(1, Math.round(len / 0.15));
-    for (let i = 0; i <= n; i++) {
-      const t = (i + 0.5) / (n + 1);
-      pickets.push([x0 + (x1 - x0) * t, z0 + (z1 - z0) * t, ang]);
+    const n = Math.max(1, Math.round(len / 0.152));
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      boards.push([x0 + (x1 - x0) * t, z0 + (z1 - z0) * t, ang, h + (rng() - 0.5) * 0.035]);
     }
-    for (const y of [0.3, 0.82]) {
-      const r = add(rails, new THREE.BoxGeometry(0.05, 0.08, len), MAT.fence, (x0 + x1) / 2, y, (z0 + z1) / 2);
+    // прожилины с внутренней стороны двора
+    const nx = Math.cos(ang) * 0.035, nz = -Math.sin(ang) * 0.035;
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    const inward = Math.sign(cx * nx + cz * nz) || 1;
+    for (const y of [0.35, h - 0.3]) {
+      const r = add(frame, new THREE.BoxGeometry(0.045, 0.09, len), MAT.darkWood, cx - nx * inward, y, cz - nz * inward);
       r.rotation.y = ang;
     }
-    const posts = Math.max(1, Math.round(len / 2));
-    for (let i = 0; i <= posts; i++) {
-      const t = i / posts;
-      add(rails, new THREE.BoxGeometry(0.11, 1.25, 0.11), MAT.darkWood, x0 + (x1 - x0) * t, 0.625, z0 + (z1 - z0) * t);
-    }
   };
-  for (const s of segs) addRun(...s);
-  // калитка (закрыта) и ворота в сад
-  addRun(-0.9, maxZ + 0.03, 0.9, maxZ + 0.03);
-  addRun(maxX + 0.03, GARDEN_GATE.z0, maxX + 0.03, GARDEN_GATE.z1);
-  const geo = picketGeometry();
-  const inst = new THREE.InstancedMesh(geo, lambert('#d5a978'), pickets.length);
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
-  const rng = mulberry32(31);
-  pickets.forEach(([x, z, a], i) => {
-    e.set(0, a + Math.PI / 2, (rng() - 0.5) * 0.03);
+  for (const r of runs) addRun(...r);
+  // ворота в сад: доски ниже, сверху решётка — сквозь неё видна следующая часть двора
+  const gateLow = 1.15;
+  addRun(maxX + 0.02, GARDEN_GATE.z0, maxX + 0.02, GARDEN_GATE.z1, gateLow);
+  // решётка из диагональных реек, обрезанных по рамке проёма
+  const gz0 = GARDEN_GATE.z0, gz1 = GARDEN_GATE.z1, glen = gz1 - gz0;
+  const y0 = gateLow, y1 = H, lattice = new THREE.Group();
+  for (const sgn of [-1, 1]) {
+    for (let c = -2.2; c <= 2.2; c += 0.2) {
+      // прямая y − y0 = sgn·(z − gz0) + c, обрезаем по прямоугольнику [gz0, gz1] × [y0, y1]
+      const pts = [];
+      for (const z of [gz0, gz1]) { const y = y0 + sgn * (z - gz0) + c; if (y >= y0 && y <= y1) pts.push([z, y]); }
+      for (const y of [y0, y1]) { const z = gz0 + (y - y0 - c) * sgn; if (z > gz0 && z < gz1) pts.push([z, y]); }
+      if (pts.length < 2) continue;
+      const [[za, ya], [zb, yb]] = pts;
+      const len = Math.hypot(zb - za, yb - ya);
+      if (len < 0.05) continue;
+      const slat = add(lattice, new THREE.BoxGeometry(0.02, 0.03, len), MAT.wood, maxX + 0.02, (ya + yb) / 2, (za + zb) / 2);
+      slat.rotation.x = -Math.atan2(yb - ya, zb - za);
+    }
+  }
+  scene.add(lattice);
+  for (const z of [gz0, gz1]) add(frame, new THREE.BoxGeometry(0.1, H + 0.08, 0.1), MAT.darkWood, maxX, (H + 0.08) / 2, z);
+  add(frame, new THREE.BoxGeometry(0.06, 0.07, glen), MAT.darkWood, maxX + 0.02, H, (gz0 + gz1) / 2);
+  add(frame, new THREE.BoxGeometry(0.06, 0.06, glen), MAT.darkWood, maxX + 0.02, gateLow, (gz0 + gz1) / 2);
+  // столбы через ~2 м
+  for (const [x0, z0, x1, z1] of runs.slice(0, 7)) {
+    const len = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(len / 2));
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      add(frame, new THREE.BoxGeometry(0.1, H + 0.08, 0.1), MAT.darkWood, x0 + (x1 - x0) * t, (H + 0.08) / 2, z0 + (z1 - z0) * t);
+    }
+  }
+  // калитка: раскос и ручка
+  const brace = add(frame, new THREE.BoxGeometry(1.9, 0.08, 0.04), MAT.darkWood, 0, H / 2, maxZ - 0.05);
+  brace.rotation.z = Math.atan2(H - 0.7, 1.7);
+  add(frame, new THREE.BoxGeometry(0.04, 0.16, 0.05), MAT.metal, 0.7, 1.0, maxZ - 0.06);
+  scene.add(frame);
+
+  const inst = new THREE.InstancedMesh(new THREE.BoxGeometry(0.14, 1, 0.024), new THREE.MeshLambertMaterial({ map: boardTexture() }), boards.length);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), c = new THREE.Color();
+  boards.forEach(([x, z, a, h], i) => {
+    e.set(0, a + Math.PI / 2, (rng() - 0.5) * 0.012);
     q.setFromEuler(e);
-    m.compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(1, 0.94 + rng() * 0.1, 1));
+    m.compose(new THREE.Vector3(x, h / 2, z), q, new THREE.Vector3(1, h, 1));
     inst.setMatrixAt(i, m);
-    inst.setColorAt(i, new THREE.Color('#d5a978').offsetHSL(0, 0, (rng() - 0.5) * 0.06));
+    inst.setColorAt(i, c.set('#ffffff').offsetHSL((rng() - 0.5) * 0.02, (rng() - 0.5) * 0.06, (rng() - 0.5) * 0.12));
   });
   inst.castShadow = inst.receiveShadow = true;
-  scene.add(inst, rails);
+  scene.add(inst);
   // табличка на воротах в сад
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.65),
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.55),
     new THREE.MeshLambertMaterial({ map: signTexture(['Сад', 'откроется после', 'уборки двора'], { size: 100 }) }));
-  sign.position.set(maxX - FENCE_T - 0.03, 1.05, (GARDEN_GATE.z0 + GARDEN_GATE.z1) / 2);
+  sign.position.set(maxX - FENCE_T - 0.03, 0.85, (GARDEN_GATE.z0 + GARDEN_GATE.z1) / 2);
   sign.rotation.y = -Math.PI / 2;
   scene.add(sign);
   refs.gardenSign = sign;
 }
 
 // ── дерево ────────────────────────────────────────────────────
-export function buildTree(scene, x, z, size, colors, seed) {
-  const g = new THREE.Group();
+// Голое осеннее дерево: ветвящийся ствол из сужающихся цилиндров (один instanced-меш).
+// Листва для деревьев и кустов — по готовым моделям, см. README.
+export function buildTree(scene, x, z, size, seed) {
   const rng = mulberry32(seed);
-  const bark = lambert('#6e5240');
-  const trunkH = 3.1 * size;
-  add(g, new THREE.CylinderGeometry(0.17 * size, 0.3 * size, trunkH, 12), bark, 0, trunkH / 2, 0);
-  add(g, new THREE.CylinderGeometry(0.34 * size, 0.42 * size, 0.18, 12), bark, 0, 0.06, 0, { cast: false });
-  for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * Math.PI * 2 + rng();
-    const br = add(g, new THREE.CylinderGeometry(0.05 * size, 0.1 * size, 1.5 * size, 8), bark,
-      Math.cos(a) * 0.45 * size, trunkH - 0.1, Math.sin(a) * 0.45 * size);
-    br.rotation.set(Math.sin(a) * 0.8, 0, -Math.cos(a) * 0.8);
-  }
-  const blobs = 9;
-  for (let i = 0; i < blobs; i++) {
-    const a = rng() * Math.PI * 2, r = (i === 0 ? 0 : 0.8 + rng() * 1.1) * size;
-    const geo = softBlob((1.15 + rng() * 0.55) * size, rng);
-    const mat = new THREE.MeshLambertMaterial({ color: colors[i % colors.length] });
-    const b = add(g, geo, mat, Math.cos(a) * r, trunkH + 0.9 * size + (rng() - 0.3) * 0.9 * size, Math.sin(a) * r);
-    b.scale.set(1, 0.82, 1);
-    b.rotation.set(rng(), rng(), rng());
-  }
-  g.position.set(x, 0, z);
-  scene.add(g);
-  return g;
+  const segs = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  const grow = (from, dir, len, r, depth) => {
+    const to = from.clone().addScaledVector(dir, len);
+    segs.push([from, to, r]);
+    if (depth === 0) return;
+    const kids = depth > 3 ? 2 : 2 + (rng() < 0.5 ? 1 : 0);
+    for (let k = 0; k < kids; k++) {
+      const axis = new THREE.Vector3(rng() - 0.5, 0, rng() - 0.5).normalize();
+      const nd = dir.clone().applyAxisAngle(axis, 0.35 + rng() * 0.5);
+      nd.lerp(up, 0.18).normalize();
+      grow(to, nd, len * (0.68 + rng() * 0.12), r * 0.64, depth - 1);
+    }
+  };
+  grow(new THREE.Vector3(0, 0, 0), new THREE.Vector3((rng() - 0.5) * 0.08, 1, (rng() - 0.5) * 0.08).normalize(), 2.2 * size, 0.24 * size, 5);
+  const geo = new THREE.CylinderGeometry(0.66, 1, 1, 9, 1);
+  geo.translate(0, 0.5, 0);
+  const inst = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ map: barkTexture() }), segs.length + 1);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), d = new THREE.Vector3();
+  segs.forEach(([a, b, r], i) => {
+    d.subVectors(b, a);
+    const len = d.length();
+    q.setFromUnitVectors(up, d.normalize());
+    m.compose(a, q, new THREE.Vector3(r, len * 1.04, r));
+    inst.setMatrixAt(i, m);
+  });
+  // расширение у корней
+  m.compose(new THREE.Vector3(0, 0, 0), new THREE.Quaternion(), new THREE.Vector3(0.42 * size, 0.35, 0.42 * size));
+  inst.setMatrixAt(segs.length, m);
+  inst.castShadow = inst.receiveShadow = true;
+  inst.position.set(x, 0, z);
+  scene.add(inst);
+  return inst;
 }
 
-/** Мягкий, слегка бугристый шар для крон. */
-export function softBlob(r, rng) {
-  const geo = new THREE.SphereGeometry(r, 28, 18);
-  const p = geo.attributes.position, v = new THREE.Vector3();
-  const a = rng() * 10, b = rng() * 10;
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i).normalize();
-    const k = 1 + 0.07 * Math.sin(v.x * 5 + a) * Math.sin(v.y * 4 + b) + 0.05 * Math.sin(v.z * 7 + a + b);
-    p.setXYZ(i, v.x * r * k, v.y * r * k, v.z * r * k);
-  }
-  geo.computeVertexNormals();
-  return geo;
-}
 
 // ── предметы двора ─────────────────────────────────────────────
 function buildYardProps(scene, MAT) {
@@ -452,94 +481,40 @@ function notebookPage() {
 }
 
 // ── за забором: сад, соседи, улица ────────────────────────────
+// За забором: крыши соседних домов, сарай в саду и голые деревья. Пустого поля не видно.
 function buildSurroundings(scene, MAT) {
-  // Сад на востоке — следующая зона
-  buildTree(scene, 12.5, -5.5, 0.85, ['#d9572e', '#e8a33a', '#b8452a'], 41);
-  buildTree(scene, 14.5, 2.5, 0.9, ['#eab845', '#d98c2d', '#c96a28'], 43);
-  buildTree(scene, 17.5, -2, 0.75, ['#e29a35', '#cf5d2b'], 47);
-  // сарай
-  const shed = new THREE.Group();
-  boxAt(shed, MAT.darkWood, -1.4, 1.4, 0, 2.2, -1.1, 1.1);
-  const rf = boxAt(shed, MAT.roof, -1.7, 1.7, 2.2, 2.35, -1.45, 1.45);
-  rf.rotation.z = 0.15;
-  boxAt(shed, lambert('#5b3a28'), -1.42, -1.38, 0, 1.8, -0.4, 0.4);
-  shed.position.set(18.5, 0, -8);
-  scene.add(shed);
-  // теплица
-  const gh = new THREE.Group();
-  const glass = new THREE.MeshLambertMaterial({ color: '#d9ecf0', transparent: true, opacity: 0.35, depthWrite: false });
-  boxAt(gh, glass, -1.2, 1.2, 0, 1.8, -2, 2, { cast: false, receive: false });
-  for (const x of [-1.2, 1.2]) for (const z of [-2, 0, 2]) boxAt(gh, lambert('#f0f0ea'), x - 0.03, x + 0.03, 0, 1.8, z - 0.03, z + 0.03);
-  gh.position.set(13, 0, 6.5);
-  scene.add(gh);
-  // грядки сада
-  for (const [x, z] of [[11, -1.5], [11, 1.5], [16, 5]]) {
-    boxAt(scene, MAT.darkWood, x - 1.2, x + 1.2, 0, 0.25, z - 0.5, z + 0.5);
-    boxAt(scene, MAT.soil, x - 1.1, x + 1.1, 0, 0.27, z - 0.42, z + 0.42, { cast: false });
-  }
-  for (let i = 0; i < 4; i++) pumpkin(scene, 15.2 + i * 0.7, 4.8 + (i % 2) * 0.5, 0.22 + (i % 3) * 0.06);
-  // дальний забор сада
-  boxAt(scene, MAT.fence, 21.5, 21.6, 0, 1.15, -10, 10);
-
-  // соседская живая изгородь на западе и у улицы
-  const bushes = [];
-  for (let z = -14; z <= 12; z += 0.85) bushes.push([-10.9, z, 0.95]);
-  for (let x = -10; x <= 21.5; x += 0.8) bushes.push([x, 13.2, 0.6]);
-  const bushMesh = new THREE.InstancedMesh(softBlob(1, mulberry32(9)), lambert('#ffffff'), bushes.length);
-  {
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), c = new THREE.Color(), r = mulberry32(12);
-    bushes.forEach(([x, z, h], i) => {
-      const k = 0.85 + r() * 0.3;
-      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), r() * 6);
-      m.compose(new THREE.Vector3(x, h * 0.9, z), q, new THREE.Vector3(0.75 * k, h * k, 0.75 * k));
-      bushMesh.setMatrixAt(i, m);
-      bushMesh.setColorAt(i, c.set(r() < 0.25 ? '#8a8a45' : '#6e8a4c').offsetHSL(0, 0, (r() - 0.5) * 0.06));
-    });
-    bushMesh.castShadow = true; bushMesh.receiveShadow = true;
-  }
-  scene.add(bushMesh);
-  // улица на юге
-  const sidewalk = new THREE.Mesh(new THREE.PlaneGeometry(120, 2.2), lambert('#c9c2b4'));
-  sidewalk.rotation.x = -Math.PI / 2; sidewalk.position.set(0, -0.012, 9.1); sidewalk.receiveShadow = true;
-  scene.add(sidewalk);
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(120, 6), lambert('#7c7a76'));
-  road.rotation.x = -Math.PI / 2; road.position.set(0, -0.015, 16.6); road.receiveShadow = true;
-  scene.add(road);
-
-  // кольцо дальних деревьев
-  const rng = mulberry32(101);
-  const crowns = ['#d9822f', '#e6b245', '#c4532c', '#9e7a3a', '#d06a2c', '#7b8d4a'];
-  const n = 70;
-  const crownGeo = softBlob(1, mulberry32(5));
-  const trunkGeo = new THREE.CylinderGeometry(0.15, 0.25, 1, 6);
-  const crownMesh = new THREE.InstancedMesh(crownGeo, new THREE.MeshLambertMaterial(), n * 2);
-  const trunkMesh = new THREE.InstancedMesh(trunkGeo, lambert('#6a503e'), n);
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), c = new THREE.Color();
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2 + rng() * 0.08, r = 32 + rng() * 22;
-    const x = Math.cos(a) * r, z = Math.sin(a) * r - 4, s = 1.6 + rng() * 1.6;
-    m.compose(new THREE.Vector3(x, s * 1.1, z), q, new THREE.Vector3(1, s * 2.2, 1));
-    trunkMesh.setMatrixAt(i, m);
-    for (let k = 0; k < 2; k++) {
-      m.compose(new THREE.Vector3(x + (rng() - 0.5) * s, s * 2.6 + k * s * 0.9, z + (rng() - 0.5) * s), q,
-        new THREE.Vector3(s * 1.5, s * 1.25, s * 1.5));
-      crownMesh.setMatrixAt(i * 2 + k, m);
-      crownMesh.setColorAt(i * 2 + k, c.set(crowns[Math.floor(rng() * crowns.length)]));
+  const house = (x, z, w, d, h, rot, wall, roof) => {
+    const g = new THREE.Group();
+    boxAt(g, lambert(wall), -w / 2, w / 2, 0, h, -d / 2, d / 2);
+    const shape = new THREE.Shape();
+    shape.moveTo(-d / 2 - 0.4, 0); shape.lineTo(d / 2 + 0.4, 0); shape.lineTo(0, d * 0.42); shape.closePath();
+    const rg = new THREE.ExtrudeGeometry(shape, { depth: w + 0.6, bevelEnabled: false });
+    rg.translate(0, 0, -(w + 0.6) / 2);
+    rg.rotateY(Math.PI / 2);
+    add(g, rg, new THREE.MeshLambertMaterial({ map: roofTexture(), color: roof }), 0, h, 0);
+    for (let k = -1; k <= 1; k += 2) {
+      boxAt(g, lambert('#fbf7ee'), k * w / 4 - 0.5, k * w / 4 + 0.5, h - 1.6, h - 0.6, d / 2, d / 2 + 0.05, { cast: false });
+      boxAt(g, lambert('#5d7c91'), k * w / 4 - 0.42, k * w / 4 + 0.42, h - 1.52, h - 0.68, d / 2 + 0.02, d / 2 + 0.07, { cast: false });
     }
-  }
-  scene.add(crownMesh, trunkMesh);
-  // соседский дом за изгородью
-  const nh = new THREE.Group();
-  boxAt(nh, lambert('#e3d3bd'), -4, 4, 0, 4, -3, 3);
-  const r1 = boxAt(nh, lambert('#6d5a4e'), -4.4, 4.4, 4, 4.2, -3.4, 3.4);
-  r1.rotation.x = 0.0;
-  const roofGeo = new THREE.ConeGeometry(5.6, 2.4, 4, 1);
-  const roofM = add(nh, roofGeo, lambert('#7a4a3c'), 0, 5.3, 0);
-  roofM.rotation.y = Math.PI / 4; roofM.scale.set(1.05, 1, 0.8);
-  for (const z of [-1.6, 1.6]) {
-    boxAt(nh, lambert('#fbf7ee'), 3.98, 4.06, 1.4, 2.8, z - 0.65, z + 0.65, { cast: false });
-    boxAt(nh, lambert('#5d7c91'), 4.0, 4.1, 1.5, 2.7, z - 0.55, z + 0.55, { cast: false });
-  }
-  nh.position.set(-19, 0, -4);
-  scene.add(nh);
+    g.position.set(x, 0, z);
+    g.rotation.y = rot;
+    scene.add(g);
+  };
+  house(-15.5, -3, 8, 7, 5.2, Math.PI / 2, '#e7dcc8', '#9a6a55');   // соседи на западе
+  house(-4, 17.5, 9, 7, 5.6, Math.PI, '#d9cbb3', '#7f5a4a');        // через улицу
+  house(9, 18.5, 7, 6, 4.8, Math.PI, '#ece3d2', '#8c4a3a');
+  house(4, -24, 9, 7, 6.2, 0, '#e2d6c0', '#6d5a4e');               // за домом
+  // сарай в саду (восток) — виден через решётку ворот и над забором
+  const shed = new THREE.Group();
+  boxAt(shed, MAT.darkWood, -1.4, 1.4, 0, 2.3, -1.1, 1.1);
+  const rf = boxAt(shed, MAT.roof, -1.7, 1.7, 2.3, 2.45, -1.45, 1.45);
+  rf.rotation.z = 0.18;
+  shed.position.set(12.5, 0, -4.5);
+  scene.add(shed);
+  // голые деревья за забором
+  buildTree(scene, 12, 1.5, 1.05, 41);
+  buildTree(scene, 15, -7, 0.95, 43);
+  buildTree(scene, -12, 5, 1.0, 47);
+  buildTree(scene, -11, -11, 0.9, 53);
+  buildTree(scene, -2, 13, 0.9, 59);
 }

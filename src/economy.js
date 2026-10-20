@@ -8,7 +8,7 @@ import { UPGRADES, BRANCHES, COINS_PER_LEAF } from './config.js';
 import { ON_GROUND, IN_BAG, SOLD } from './leaves.js';
 
 export function newProgress() {
-  return { coins: 0, upgrades: { grab: 0, speed: 0, bag: 0 } };
+  return { coins: 0, upgrades: { grab: 0, speed: 0, bag: 0 }, carry: 0 };
 }
 
 export function stat(progress, branch) {
@@ -107,13 +107,16 @@ export class Economy {
       up[b] = Math.min(Math.max(v, 0), max);
     }
     this.recount();
-    const expected = this.sold * COINS_PER_LEAF - spentOn(up);
+    // carry — заработок, перенесённый из сохранения прежней раскладки двора
+    const carry = Number.isFinite(this.progress.carry) && this.progress.carry > 0 ? Math.floor(this.progress.carry) : 0;
+    this.progress.carry = carry;
+    const expected = carry + this.sold * COINS_PER_LEAF - spentOn(up);
     if (expected < 0) {
       // покупок больше, чем заработано, — сохранение повреждено; откатываем покупки
       for (const b of BRANCHES) up[b] = 0;
       fixes.push('upgrades exceed earnings');
     }
-    const coins = this.sold * COINS_PER_LEAF - spentOn(up);
+    const coins = carry + this.sold * COINS_PER_LEAF - spentOn(up);
     if (this.progress.coins !== coins) fixes.push(`coins ${this.progress.coins} -> ${coins}`);
     this.progress.coins = coins;
     if (this.inBag > this.capacity) {

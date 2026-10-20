@@ -30,7 +30,7 @@ export const COINS_PER_LEAF = 1;
 export const ZONE = {
   id: 'yard',
   name: 'Двор',
-  leafCount: 600,
+  leafCount: 2500,
   // границы участка (метры, мир XZ): с севера дом, с остальных сторон забор
   minX: -8, maxX: 8, minZ: -9, maxZ: 7,
 };
@@ -50,7 +50,8 @@ export const GRAB_RADIUS = 2.4;
 export const REMAINING_HIGHLIGHT = 12;
 
 export const SAVE_KEY = 'leaf-yard-save-v1';
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
+// v1 — двор из 600 листьев; при загрузке переносятся деньги и покупки (см. game.js)
 
 export function plural(n, one, few, many) {
   const m10 = n % 10, m100 = n % 100;

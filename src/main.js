@@ -33,7 +33,9 @@ let game, startNote = '';
   const saved = NO_SAVE ? null : readLocal();
   try {
     game = createGame(saved, { leafCount: LEAF_OVERRIDE ?? undefined });
-    if (saved) startNote = 'Продолжаем с сохранения.';
+    if (saved) startNote = game.migrated
+      ? 'Двор обновился: листья разложены заново, заработанные монеты и покупки сохранены.'
+      : 'Продолжаем с сохранения.';
     if (game.fixes.length) console.warn('save fixes', game.fixes);
   } catch (e) {
     console.warn(e);
@@ -64,7 +66,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.autoClear = false;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 600);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 400); // ближняя плоскость 0,1 м — точнее глубина, листья не мерцают
 camera.rotation.order = 'YXZ';
 let world, ground;
 if (FRAGMENT_MODE) {
@@ -145,7 +147,10 @@ document.addEventListener('keydown', (e) => {
     case 'Digit3': selectTool(3); break;
   }
 });
-document.addEventListener('keyup', (e) => keys.delete(e.code));
+document.addEventListener('keyup', (e) => {
+  keys.delete(e.code);
+  if (e.code === 'KeyE' && settings.collectMode === 'hold' && !mouseHeld) releaseHold();
+});
 
 // Сбор — левой кнопкой (клик трекпада) по листу под точкой. Принимаем нажатие только
 // во время игры при захваченном курсоре: клики по блокноту, меню и клик захвата курсора
@@ -158,7 +163,17 @@ document.addEventListener('mousedown', (e) => {
   pickRequested = true;
   mouseHeld = true;
 });
-document.addEventListener('mouseup', (e) => { if (e.button === 0) mouseHeld = false; });
+// Отпускание: повторение прекращается, незавершённый повторный подбор отменяется.
+// Подбор, начатый самим нажатием (клик), доводится до конца — иначе короткий клик
+// никогда не успевал бы собрать лист при времени подбора 0,6 с.
+function releaseHold() {
+  if (pick?.repeat) pick = null;
+}
+document.addEventListener('mouseup', (e) => {
+  if (e.button !== 0) return;
+  mouseHeld = false;
+  if (!(settings.collectMode === 'hold' && keys.has('KeyE'))) releaseHold();
+});
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 document.addEventListener('mousemove', (e) => {
@@ -408,7 +423,8 @@ function updatePicking(dt) {
         fullHintUntil = now + 3;
         if (now - lastDenied > 0.8) { sound.denied(); lastDenied = now; }
       } else {
-        pick = { target: hoverId, elapsed: 0, duration: economy.pickTime };
+        // repeat — подбор начат удержанием (а не новым нажатием): отпускание его отменяет
+        pick = { target: hoverId, elapsed: 0, duration: economy.pickTime, repeat: !pickRequested && !autoCollect };
       }
       pickRequested = false;
     } else if (want && hoverId < 0 && !held) {
@@ -424,6 +440,7 @@ function updatePicking(dt) {
       const got = economy.collect(ids);
       if (got.length) {
         leaves.flyToCamera(got, now);
+        leaves.settle(field.settleAfter(got), got); // лежавшие сверху опускаются, а не висят
         sound.rustle(got.length);
         ui.bag(economy.inBag, economy.capacity, true);
         game.hints.picked = true;
@@ -460,10 +477,9 @@ function updateMovement(dt) {
   const p = resolveCircle(player.x + player.vx * dt, player.z + player.vz * dt, PLAYER.radius);
   player.x = p.x; player.z = p.z;
   const realVx = (player.x - ox) / Math.max(dt, 1e-4), realVz = (player.z - oz) / Math.max(dt, 1e-4);
-  const kicked = leaves.kick(player.x, player.z, realVx, realVz, dt, Math.random);
-  if (kicked) {
-    dirty = true;
-    if (now - lastStep > 0.32) { sound.step(); lastStep = now; }
+  // идём поверх листьев: шорох и лёгкое покачивание, листья остаются на месте
+  if (leaves.stepOver(player.x, player.z, Math.hypot(realVx, realVz)) && now - lastStep > 0.32) {
+    sound.step(); lastStep = now;
   }
   const eye = surfaceHeight(player.x, player.z) + PLAYER.eyeHeight;
   player.eye += (eye - player.eye) * Math.min(1, dt * 12);
@@ -498,7 +514,8 @@ function saveNow() {
   dirty = false;
   lastSave = now;
   document.getElementById('save-status').textContent = ok
-    ? `Сохранено в ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}. Сохранение — после сдачи, покупки и каждые 10 секунд уборки.`
+    ? `Сохранено в ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} — после сдачи, покупки и каждые 10 секунд уборки. ` +
+      `Сохранение хранится в этом браузере для адреса ${location.origin}: открывайте игру по нему же.`
     : 'Не удалось сохранить: хранилище браузера недоступно. Используйте экспорт в файл.';
 }
 
@@ -515,11 +532,26 @@ document.getElementById('import-btn').addEventListener('click', () => importInpu
 importInput.addEventListener('change', async () => {
   const file = importInput.files[0];
   if (!file) return;
+  const status = document.getElementById('save-status');
+  if (NO_SAVE) {
+    status.textContent = 'В этом режиме сохранение отключено — откройте основной двор (без ?fragment и ?fresh).';
+    importInput.value = '';
+    return;
+  }
   try {
     const data = parseSave(await file.text());
     createGame(data); // проверка, что сохранение загружается
-    skipSave = true;
-    writeLocal(data);
+    // пишем и сразу читаем обратно: перезагружаемся, только если запись действительно удалась
+    const written = writeLocal(data);
+    const back = written ? readLocal() : null;
+    const ok = !!back && back.seed === data.seed && back.savedAt === data.savedAt;
+    if (!ok) {
+      status.textContent = 'Не удалось записать сохранение в хранилище браузера (оно переполнено или запрещено). ' +
+        'Текущая игра не изменена. Проверьте настройки Safari: «Конфиденциальность» → разрешить данные сайтов.';
+      importInput.value = '';
+      return;
+    }
+    skipSave = true; // не перезаписывать восстановленное текущей игрой при перезагрузке
     location.reload();
   } catch (e) {
     document.getElementById('save-status').textContent = `Не удалось восстановить: ${e.message}`;
@@ -661,6 +693,7 @@ if (DEBUG) {
     openShop() { openShop(); },
     hover() { return hoverId; },
     pickState() { return pick && { ...pick }; },
+    leafY(i) { return { lift: field.lift[i], shown: leaves.shown[i] }; },
     startPick() { if (hoverId >= 0) pick = { target: hoverId, elapsed: 0, duration: economy.pickTime }; },
     setPickProgress(p) { if (pick) pick.elapsed = p * pick.duration; },
     hideHud(v) { ui.show('hud', !v); },

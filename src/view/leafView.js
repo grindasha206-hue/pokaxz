@@ -1,6 +1,7 @@
-// Отрисовка листьев: один instanced-меш с текстурой из атласа (4 вида × 4 окраски),
-// загнутые края и кончик — в вершинном шейдере. Подсветка, дрожание при подборе,
-// полёт к камере, реакция на шаги, подсветка последних листьев.
+// Отрисовка листьев: один instanced-меш с готовыми текстурами (6 видов),
+// изгибы листа — в вершинном шейдере. Подсветка, дрожание при подборе, полёт к камере,
+// лёгкое покачивание под ногами (без смещения), опускание листьев после сбора нижних,
+// подсветка последних листьев.
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { REMAINING_HIGHLIGHT } from '../config.js';
@@ -51,7 +52,7 @@ function leafGeometry() {
 
 function addInstanceAttributes(geo, n) {
   geo.setAttribute('aUvOffset', new THREE.InstancedBufferAttribute(new Float32Array(n * 2), 2));
-  geo.setAttribute('aCurl', new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3));
+  geo.setAttribute('aCurl', new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4));
 }
 
 // общий кусок шейдера: смещение UV в клетку атласа и изгиб листа
@@ -59,10 +60,11 @@ function injectLeaf(shader, withNormal) {
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', `#include <common>
       attribute vec2 aUvOffset;
-      attribute vec3 aCurl;
+      attribute vec4 aCurl; // x — края вверх, y — кончик, z — скручивание, w — волна вдоль листа
       float leafBend(vec3 p) {
         float zt = min(p.z, 0.0), zb = max(p.z, 0.0);
-        return aCurl.x * p.x * p.x + aCurl.y * zt * zt + 0.35 * aCurl.y * zb * zb + aCurl.z * p.x * p.z;
+        return aCurl.x * p.x * p.x + aCurl.y * zt * zt + 0.35 * aCurl.y * zb * zb + aCurl.z * p.x * p.z
+          + aCurl.w * 0.035 * (1.0 + sin(p.z * 9.0 + p.x * 3.0));
       }`)
     .replace('#include <uv_vertex>', `#include <uv_vertex>
       #ifdef USE_MAP
@@ -76,8 +78,9 @@ function injectLeaf(shader, withNormal) {
   if (withNormal) {
     shader.vertexShader = shader.vertexShader.replace('#include <beginnormal_vertex>', `
       float zt0 = min(position.z, 0.0), zb0 = max(position.z, 0.0);
-      float dydx = 2.0 * aCurl.x * position.x + aCurl.z * position.z;
-      float dydz = 2.0 * aCurl.y * zt0 + 0.7 * aCurl.y * zb0 + aCurl.z * position.x;
+      float wv = aCurl.w * 0.035 * cos(position.z * 9.0 + position.x * 3.0);
+      float dydx = 2.0 * aCurl.x * position.x + aCurl.z * position.z + 3.0 * wv;
+      float dydz = 2.0 * aCurl.y * zt0 + 0.7 * aCurl.y * zb0 + aCurl.z * position.x + 9.0 * wv;
       vec3 objectNormal = normalize(vec3(-dydx, 1.0, -dydz));`);
   }
 }
@@ -89,10 +92,15 @@ function leafDepthMaterial({ alphaMap }) {
   return mat;
 }
 
-/** Материал с изгибом листа: y = cup·x² + tip·z² (к кончику, −Z) + twist·x·z. */
+/** Материал с изгибом листа; цвет текстуры немного приглушён (насыщенность ×0.8). */
 function leafMaterial({ map, alphaMap }) {
   const mat = new THREE.MeshLambertMaterial({ map, alphaMap, alphaTest: 0.5, side: THREE.DoubleSide, alphaToCoverage: true });
-  mat.onBeforeCompile = (shader) => injectLeaf(shader, true);
+  mat.onBeforeCompile = (shader) => {
+    injectLeaf(shader, true);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      float leafLum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+      diffuseColor.rgb = mix(vec3(leafLum), diffuseColor.rgb, 0.88);`);
+  };
   return mat;
 }
 
@@ -113,35 +121,38 @@ export class LeafView {
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     scene.add(this.mesh);
 
-    // постоянные свойства листьев: клетка атласа, изгиб, оттенок с «затенением» нижних слоёв
+    // постоянные свойства листьев: клетка атласа, изгибы, оттенок
     const uvo = geo.attributes.aUvOffset.array, curl = geo.attributes.aCurl.array;
-    this.baseColor = new Float32Array(n * 3);
+    this.tint = new Float32Array(n * 3);
     const rng = mulberry32(n + 9);
-    let maxLift = 0.0001;
-    for (let i = 0; i < n; i++) maxLift = Math.max(maxLift, field.lift[i]);
-    const liftRef = Math.min(maxLift, 0.03);
     for (let i = 0; i < n; i++) {
       const [col, row] = TILES[field.shape[i] % TILES.length];
       uvo[i * 2] = col / ATLAS_COLS;
       uvo[i * 2 + 1] = (ATLAS_ROWS - 1 - row) / ATLAS_ROWS;
       const b = field.bend[i];
       const h1 = (b & 15) / 15, h2 = ((b >> 4) & 15) / 15;
-      curl[i * 3] = 0.15 + 0.45 * h1;            // края приподняты
-      curl[i * 3 + 1] = -0.05 + 0.7 * h2;        // кончик загнут
-      curl[i * 3 + 2] = (rng() - 0.5) * 0.45;    // лёгкое скручивание
-      // нижние слои темнее — мягкая «тень» внутри ковра без карты теней
-      const depth = Math.min(1, field.lift[i] / liftRef);
-      const k = (0.62 + 0.38 * depth) * (0.93 + rng() * 0.12);
-      // field.color — лёгкий сдвиг оттенка, естественная окраска текстуры сохраняется
-      const warm = [1, 1.04, 0.97, 1.02][field.color[i] % 4];
-      this.baseColor.set([k * warm, k, k * (2 - warm) * 0.98], i * 3);
+      // несколько умеренных изгибов: края, кончик, лёгкое скручивание и волна вдоль листа
+      curl[i * 4] = 0.12 + 0.3 * h1;
+      curl[i * 4 + 1] = -0.03 + 0.5 * h2;
+      curl[i * 4 + 2] = (rng() - 0.5) * 0.24;
+      curl[i * 4 + 3] = rng() * 0.7;
+      // field.color — лёгкий сдвиг оттенка, окраска текстуры сохраняется
+      const warm = [1, 1.03, 0.98, 1.015][field.color[i] % 4], j = 0.94 + rng() * 0.1;
+      this.tint.set([j * warm, j, j * (2 - warm) * 0.99], i * 3);
     }
     geo.attributes.aUvOffset.needsUpdate = true;
     geo.attributes.aCurl.needsUpdate = true;
 
-    this.hop = new Float32Array(n);   // подлёт при пинке
-    this.spin = new Float32Array(n);
+    this.shown = Float32Array.from(field.lift); // высота, на которой лист сейчас нарисован
+    this.tmpN = [];
+    this.cover = new Uint8Array(n);
+    for (let i = 0; i < n; i++) this.cover[i] = Math.min(255, this.coverOf(i));
+    this.falling = new Set();                    // листья, опускающиеся после сбора нижних
+    this.stir = new Float32Array(n);             // покачивание под ногами (без смещения)
+    this.stirring = new Set();
+    this.now = 0;
     this.flying = [];
+    this.flyingIds = new Set();
     this.highlighted = new Set();
     this.raised = -1;
     this.wobbleId = -1;
@@ -156,7 +167,7 @@ export class LeafView {
     for (let k = 0; k < 32; k++) {
       const [col, row] = TILES[k % TILES.length];
       fxGeo.attributes.aUvOffset.setXY(k, col / ATLAS_COLS, (ATLAS_ROWS - 1 - row) / ATLAS_ROWS);
-      fxGeo.attributes.aCurl.setXYZ(k, 0.3, 0.2, 0);
+      fxGeo.attributes.aCurl.setXYZW(k, 0.3, 0.2, 0, 0.3);
     }
     this.fx = new THREE.InstancedMesh(fxGeo, this.material, 32);
     this.fx.frustumCulled = false;
@@ -177,13 +188,17 @@ export class LeafView {
 
   writeMatrix(i, extraLift = 0, extraYaw = 0) {
     const f = this.field;
+    if (this.flyingIds.has(i)) return; // полёт рисуется в update()
     if (f.state[i] !== ON_GROUND) {
       this.mesh.setMatrixAt(i, ZERO);
     } else {
       const s = this.leafScale(i);
-      tmpE.set(f.tiltX[i] + this.hop[i] * 9, f.yaw[i] + this.spin[i] + extraYaw, f.tiltZ[i] - this.hop[i] * 6);
+      // покачивание: лист чуть поднимает край и возвращается на место
+      const st = this.stir[i], w = st ? Math.sin(this.now * 13 + i * 1.7) * st : 0;
+      const fl = f.flat[i];
+      tmpE.set(f.tiltX[i] * fl + w * 0.1, f.yaw[i] + extraYaw + w * 0.04, f.tiltZ[i] * fl + w * 0.07);
       tmpQ.setFromEuler(tmpE);
-      tmpP.set(f.x[i], f.y(i) + this.hop[i] + extraLift, f.z[i]);
+      tmpP.set(f.x[i], surfaceHeight(f.x[i], f.z[i]) + this.shown[i] + st * 0.004 + extraLift, f.z[i]);
       tmpM.compose(tmpP, tmpQ, tmpS.set(s, s, s));
       this.mesh.setMatrixAt(i, tmpM);
     }
@@ -199,9 +214,20 @@ export class LeafView {
     return this.leafScale(i) * 0.36;
   }
 
+  /** Сколько лежащих листьев накрывает лист i (для затенения нижних слоёв). */
+  coverOf(i) {
+    const f = this.field;
+    let n = 0;
+    for (const j of f.neighbours(i, this.tmpN)) if (j > i && f.state[j] === ON_GROUND) n++;
+    return n;
+  }
+
   writeColor(i, k) {
-    const b = this.baseColor;
-    tmpC.setRGB(b[i * 3] * k, b[i * 3 + 1] * k, b[i * 3 + 2] * k);
+    // накрытые листья чуть темнее — перекрытия читаются без круглых теней;
+    // одиночный лист на земле — полной яркости
+    const shade = (1 - 0.1 * Math.min(2, this.cover[i])) * k;
+    const t = this.tint;
+    tmpC.setRGB(t[i * 3] * shade, t[i * 3 + 1] * shade, t[i * 3 + 2] * shade);
     this.mesh.setColorAt(i, tmpC);
     this.colorDirty = true;
   }
@@ -213,7 +239,9 @@ export class LeafView {
   }
 
   refreshAll() {
-    for (let i = 0; i < this.field.count; i++) this.writeMatrix(i);
+    this.shown.set(this.field.lift);
+    for (let i = 0; i < this.field.count; i++) this.cover[i] = Math.min(255, this.coverOf(i));
+    for (let i = 0; i < this.field.count; i++) { this.writeMatrix(i); this.writeColor(i, 1); }
     this.flush();
   }
 
@@ -240,14 +268,17 @@ export class LeafView {
     this.writeMatrix(target, 0.006 + 0.035 * p * p, Math.sin(now * 38) * 0.09 * p);
   }
 
-  /** Собранные листья плавно подлетают к камере и исчезают. */
+  /** Собранные листья плавно подлетают к камере и исчезают — все, сколько взял захват. */
   flyToCamera(ids, now) {
     const f = this.field;
     ids.forEach((i, k) => {
+      this.flyingIds.add(i);
+      this.falling.delete(i);
+      this.stirring.delete(i);
       this.flying.push({
         i, t0: now + k * 0.045, dur: 0.5 + Math.min(k, 6) * 0.015,
-        from: new THREE.Vector3(f.x[i], f.y(i) + (i === this.wobbleId ? 0.04 : 0), f.z[i]),
-        yaw: f.yaw[i], tilt: f.tiltX[i], s: this.leafScale(i),
+        from: new THREE.Vector3(f.x[i], surfaceHeight(f.x[i], f.z[i]) + this.shown[i] + (i === this.wobbleId ? 0.04 : 0), f.z[i]),
+        yaw: f.yaw[i], tilt: f.tiltX[i] * f.flat[i], s: this.leafScale(i),
         spin: (k % 2 ? 1 : -1) * (2 + (i % 5) * 0.4),
       });
     });
@@ -269,24 +300,33 @@ export class LeafView {
     }
   }
 
-  /** Пинок листьев ногами: лёгкий сдвиг, поворот и подлёт. Возвращает число задетых. */
-  kick(px, pz, vx, vz, dt, rng) {
-    const f = this.field;
-    const speed = Math.hypot(vx, vz);
+  /** Листья, лежавшие на собранных, плавно опускаются; открывшиеся снизу — светлеют. */
+  settle(ids, removed = []) {
+    for (const i of ids) this.falling.add(i);
+    const f = this.field, near = new Set();
+    for (const r of removed) for (const j of f.neighbours(r, this.tmpN)) if (j < r && f.state[j] === ON_GROUND) near.add(j);
+    for (const j of near) {
+      const c = this.coverOf(j);
+      if (c !== this.cover[j]) { this.cover[j] = c; this.writeColor(j, this.highlighted.has(j) ? 1.22 : 1); }
+    }
+  }
+
+  /**
+   * Игрок идёт поверх листьев: они не сдвигаются, только коротко покачиваются.
+   * Возвращает число задетых листьев (для шороха).
+   */
+  stepOver(px, pz, speed) {
     if (speed < 0.6) return 0;
+    const f = this.field, R = 0.32;
     let n = 0;
-    const R = 0.4;
     for (let i = 0; i < f.count; i++) {
       if (f.state[i] !== ON_GROUND) continue;
       const dx = f.x[i] - px, dz = f.z[i] - pz;
       if (Math.abs(dx) > R || Math.abs(dz) > R) continue;
       const d = Math.hypot(dx, dz);
       if (d > R) continue;
-      const k = (1 - d / R) * dt * 1.6;
-      const nx = d > 1e-4 ? dx / d : 0, nz = d > 1e-4 ? dz / d : 0;
-      f.nudge(i, (vx * 0.5 + nx * speed * 0.6) * k, (vz * 0.5 + nz * speed * 0.6) * k);
-      this.hop[i] = Math.min(0.05, this.hop[i] + k * 0.2);
-      this.spin[i] += (rng() - 0.5) * k * 6;
+      const k = 1 - d / R;
+      if (k > this.stir[i]) { this.stir[i] = k; this.stirring.add(i); }
       n++;
     }
     return n;
@@ -294,19 +334,25 @@ export class LeafView {
 
   update(now, dt, camera, remainingIds) {
     const f = this.field;
-    for (let i = 0; i < f.count; i++) {
-      if (this.hop[i] > 0) {
-        this.hop[i] = Math.max(0, this.hop[i] - dt * 0.3);
-        if (i !== this.wobbleId) this.writeMatrix(i, i === this.raised ? 0.006 : 0);
-      }
+    this.now = now;
+    for (const i of this.stirring) {
+      this.stir[i] = Math.max(0, this.stir[i] - dt * 2.2);
+      if (this.stir[i] === 0) this.stirring.delete(i);
+      if (i !== this.wobbleId) this.writeMatrix(i, i === this.raised ? 0.006 : 0);
+    }
+    for (const i of this.falling) {
+      const target = f.lift[i], d = target - this.shown[i];
+      const step = dt * 0.25;
+      this.shown[i] = Math.abs(d) <= step ? target : this.shown[i] + Math.sign(d) * step;
+      if (this.shown[i] === target) { this.falling.delete(i); this.writeColor(i, this.highlighted.has(i) ? 1.22 : 1); }
+      if (i !== this.wobbleId) this.writeMatrix(i, i === this.raised ? 0.006 : 0);
     }
     // полёт к камере: подъём, кувырок и плавный перелёт к точке перед глазами
     if (this.flying.length) {
       const target = camera.localToWorld(tmpB.copy(EYE_TARGET));
       this.flying = this.flying.filter((fl) => {
-        const t = (now - fl.t0) / fl.dur;
-        if (t < 0) return true; // ждёт своей очереди и лежит на месте
-        if (t >= 1) { this.mesh.setMatrixAt(fl.i, ZERO); this.matrixDirty = true; return false; }
+        const t = Math.max(0, (now - fl.t0) / fl.dur); // ждущие очереди лежат на месте (t = 0)
+        if (t >= 1) { this.mesh.setMatrixAt(fl.i, ZERO); this.matrixDirty = true; this.flyingIds.delete(fl.i); return false; }
         const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
         // квадратичная кривая: старт → точка над листом → перед камерой
         tmpA.copy(fl.from); tmpA.y += 0.3;

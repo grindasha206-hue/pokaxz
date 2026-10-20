@@ -36,7 +36,7 @@ export function parseSave(text) {
   let data;
   try { data = typeof text === 'string' ? JSON.parse(text) : text; } catch { throw new Error('Файл не похож на сохранение'); }
   if (!data || typeof data !== 'object') throw new Error('Файл не похож на сохранение');
-  if (data.version !== SAVE_VERSION) throw new Error(`Неизвестная версия сохранения: ${data.version}`);
+  if (data.version !== SAVE_VERSION && data.version !== 1) throw new Error(`Неизвестная версия сохранения: ${data.version}`);
   if (!Number.isInteger(data.seed)) throw new Error('В сохранении нет зерна участка');
   if (!data.progress || !data.progress.upgrades) throw new Error('В сохранении нет покупок');
   if (!data.zones || !data.zones[level.id]) throw new Error('В сохранении нет состояния двора');

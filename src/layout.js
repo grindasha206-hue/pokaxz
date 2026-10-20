@@ -22,16 +22,18 @@ const box = (id, x0, x1, z0, z1, y1, extra = {}) => ({ id, kind: 'box', x0, x1, 
 const circle = (id, x, z, r, y1, extra = {}) => ({ id, kind: 'circle', x, z, r, y0: 0, y1, ...extra });
 
 export const T = 0.08; // полутолщина забора
+// высокий дощатый забор: с уровня глаз (1,62 м) за ним не видно пустого поля
+export const FENCE_H = 1.85;
 
 export const OBSTACLES = [
   // дом закрывает северную сторону целиком
   box('house', -6.5, 6.5, ZONE.minZ - 7, ZONE.minZ, 6.5),
   // забор
-  box('fence-n-w', ZONE.minX - T, -6.5, ZONE.minZ - T, ZONE.minZ + T, 1.15),
-  box('fence-n-e', 6.5, ZONE.maxX + T, ZONE.minZ - T, ZONE.minZ + T, 1.15),
-  box('fence-w', ZONE.minX - T, ZONE.minX + T, ZONE.minZ, ZONE.maxZ, 1.15),
-  box('fence-e', ZONE.maxX - T, ZONE.maxX + T, ZONE.minZ, ZONE.maxZ, 1.15),
-  box('fence-s', ZONE.minX, ZONE.maxX, ZONE.maxZ - T, ZONE.maxZ + T, 1.15),
+  box('fence-n-w', ZONE.minX - T, -6.5, ZONE.minZ - T, ZONE.minZ + T, FENCE_H),
+  box('fence-n-e', 6.5, ZONE.maxX + T, ZONE.minZ - T, ZONE.minZ + T, FENCE_H),
+  box('fence-w', ZONE.minX - T, ZONE.minX + T, ZONE.minZ, ZONE.maxZ, FENCE_H),
+  box('fence-e', ZONE.maxX - T, ZONE.maxX + T, ZONE.minZ, ZONE.maxZ, FENCE_H),
+  box('fence-s', ZONE.minX, ZONE.maxX, ZONE.maxZ - T, ZONE.maxZ + T, FENCE_H),
   // предметы двора
   box('container', CONTAINER.x - CONTAINER.w / 2, CONTAINER.x + CONTAINER.w / 2,
     CONTAINER.z - CONTAINER.d / 2, CONTAINER.z + CONTAINER.d / 2, CONTAINER.h),
@@ -62,16 +64,18 @@ function yardSurface(x, z) {
   return 0;
 }
 
+// Плотность листьев во дворе: сумма мягких скоплений (у забора и дома, под деревом,
+// «наносы» ветра) с плавным спадом к редким листьям. Без резких границ и ровного ковра.
 function yardDensity(x, z, noise, drift) {
   const toFence = Math.min(x - ZONE.minX, ZONE.maxX - x, ZONE.maxZ - z, z - ZONE.minZ);
-  let d = 0.06;
-  d += 2.4 * Math.max(0, 1 - toFence / 1.5) ** 1.5;                 // вдоль забора и дома
+  let d = 0.02;
+  d += 1.3 * Math.exp(-((toFence / 0.8) ** 2));                     // у забора и дома
   const toTree = Math.hypot(x - TREE.x, z - TREE.z);
-  d += 3.2 * Math.max(0, 1 - toTree / 4.6) ** 1.2;                   // под деревом
-  for (const [cx, cz, r] of drift) d += 2.6 * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) / (r * r));
-  const n = noise(x * 0.38, z * 0.38);
-  d *= Math.max(0, n - 0.22) * 2.6;                                  // пятна и чистые промежутки
-  if (onPath(x, z)) d *= 0.22;                                       // на дорожке — редкие листья
+  d += 2.4 * Math.exp(-((toTree / 2.2) ** 2));                       // под деревом
+  for (const [cx, cz, r] of drift) d += 2.2 * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) / (r * r));
+  d *= 0.45 + noise(x * 0.5, z * 0.5);                               // неровные края скоплений
+  d = d ** 1.5;                                                      // скопления гуще, промежутки чище
+  if (onPath(x, z)) d *= 0.3;                                        // на дорожке реже
   if (yardSurface(x, z) > 0.15) d *= 0.7;                            // крыльцо
   const toContainer = Math.hypot(x - CONTAINER.x, z - CONTAINER.z);
   if (toContainer < 1.2) d *= 0.4;
@@ -81,7 +85,7 @@ function yardDensity(x, z, noise, drift) {
 export const YARD = {
   id: 'yard',
   name: 'Двор',
-  leafCount: ZONE.leafCount,
+  leafCount: 2500,      // см. README: экономика и производительность
   zone: ZONE,
   inset: T,
   obstacles: OBSTACLES,
@@ -91,12 +95,11 @@ export const YARD = {
   surface: yardSurface,
   onPath: (x, z) => inRect(x, z, PATH) || inRect(x, z, PORCH_STEP),
   density: yardDensity,
-  maxDensity: 4.2,
-  drifts: 7,
-  starter: { x: 0.9, z: 3.3, r: 1.1, count: 28 },
-  leafMargin: 0.14,
-  leafSize: 1.9,       // множитель размера листа (у двора пока крупные листья)
-  carpet: false,
+  maxDensity: 6,
+  drifts: 10,
+  starter: { x: 0.9, z: 3.3, r: 0.9, count: 60 },
+  leafMargin: 0.08,
+  leafSize: 1.12,
 };
 
 // ── фрагмент земли: проверка ковра из листьев и подбора ─────
@@ -166,7 +169,6 @@ export const FRAGMENT = {
   starter: null,
   leafMargin: 0.06,
   leafSize: 1,
-  carpet: true,
 };
 
 export const LEVELS = { yard: YARD, fragment: FRAGMENT };

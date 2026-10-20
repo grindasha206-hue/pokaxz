@@ -18,27 +18,77 @@ export function toTexture(c, { repeat = 1, srgb = true } = {}) {
   return t;
 }
 
-/** Мягкая трава: пятна оттенков и короткие штрихи. */
+/**
+ * Спокойный газон: крупные мягкие переходы оттенков и едва заметные штрихи травинок.
+ * Без контрастного шума, который на расстоянии рябит и повторяется.
+ */
 export function paintGrass(ctx, x, y, w, h, seed, scale = 1) {
   const rng = mulberry32(seed);
-  ctx.fillStyle = '#7d9150';
+  ctx.fillStyle = '#7a8d4f';
   ctx.fillRect(x, y, w, h);
-  const blobs = Math.floor((w * h) / (900 * scale));
+  const blobs = Math.floor((w * h) / (2600 * scale));
   for (let i = 0; i < blobs; i++) {
-    const px = x + rng() * w, py = y + rng() * h, r = (6 + rng() * 26) * scale;
+    const px = x + rng() * w, py = y + rng() * h, r = (20 + rng() * 60) * scale;
     const tone = rng();
-    ctx.fillStyle = tone < 0.33 ? 'rgba(104,128,64,0.35)' : tone < 0.66 ? 'rgba(140,152,82,0.30)' : 'rgba(92,112,58,0.32)';
-    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+    const c = tone < 0.4 ? [108, 128, 70] : tone < 0.75 ? [134, 146, 84] : [118, 120, 72];
+    const g = ctx.createRadialGradient(px, py, 0, px, py, r);
+    g.addColorStop(0, `rgba(${c},0.22)`); g.addColorStop(1, `rgba(${c},0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(px - r, py - r, r * 2, r * 2);
   }
-  const strokes = Math.floor((w * h) / (28 * scale));
+  const strokes = Math.floor((w * h) / (40 * scale));
   ctx.lineWidth = Math.max(1, scale);
-  for (let i = 0; i < strokes; i++) {
-    const px = x + rng() * w, py = y + rng() * h, l = (2 + rng() * 4) * scale;
-    const a = -Math.PI / 2 + (rng() - 0.5) * 1.2;
-    const tone = rng();
-    ctx.strokeStyle = tone < 0.5 ? 'rgba(160,176,98,0.45)' : 'rgba(78,98,48,0.45)';
-    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + Math.cos(a) * l, py + Math.sin(a) * l); ctx.stroke();
+  for (const [col, part] of [['rgba(150,166,96,0.16)', 0.5], ['rgba(94,112,60,0.16)', 0.5]]) {
+    ctx.strokeStyle = col;
+    ctx.beginPath();
+    for (let i = 0; i < strokes * part; i++) {
+      const px = x + rng() * w, py = y + rng() * h, l = (2 + rng() * 3) * scale;
+      const a = -Math.PI / 2 + (rng() - 0.5) * 1.2;
+      ctx.moveTo(px, py); ctx.lineTo(px + Math.cos(a) * l, py + Math.sin(a) * l);
+    }
+    ctx.stroke();
   }
+}
+
+/** Доска забора: продольные волокна и пара сучков. */
+export function boardTexture() {
+  const c = canvas(128, 1024), ctx = c.getContext('2d'), rng = mulberry32(31);
+  ctx.fillStyle = '#a77b52'; ctx.fillRect(0, 0, 128, 1024);
+  for (let i = 0; i < 90; i++) {
+    const x = rng() * 128;
+    ctx.strokeStyle = `rgba(${rng() < 0.5 ? '90,58,34' : '196,154,108'},${0.12 + rng() * 0.2})`;
+    ctx.lineWidth = 0.6 + rng() * 2.2;
+    ctx.beginPath(); ctx.moveTo(x, 0);
+    for (let y = 0; y <= 1024; y += 64) ctx.lineTo(x + Math.sin(y * 0.01 + i) * 3, y);
+    ctx.stroke();
+  }
+  for (let i = 0; i < 3; i++) {
+    const x = 20 + rng() * 88, y = 100 + rng() * 820;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, 9);
+    g.addColorStop(0, 'rgba(70,40,20,0.7)'); g.addColorStop(1, 'rgba(70,40,20,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - 10, y - 14, 20, 28);
+  }
+  // тёмные кромки доски
+  ctx.fillStyle = 'rgba(60,36,20,0.35)';
+  ctx.fillRect(0, 0, 4, 1024); ctx.fillRect(124, 0, 4, 1024);
+  return toTexture(c);
+}
+
+/** Кора: вертикальные трещины и пятна. */
+export function barkTexture() {
+  const c = canvas(256), ctx = c.getContext('2d'), rng = mulberry32(13);
+  ctx.fillStyle = '#6a5444'; ctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 70; i++) {
+    const x = rng() * 256;
+    ctx.strokeStyle = `rgba(${rng() < 0.6 ? '40,30,24' : '140,120,100'},${0.25 + rng() * 0.3})`;
+    ctx.lineWidth = 1 + rng() * 3;
+    ctx.beginPath(); ctx.moveTo(x, 0);
+    for (let y = 0; y <= 256; y += 32) ctx.lineTo(x + (rng() - 0.5) * 8, y);
+    ctx.stroke();
+  }
+  const t = toTexture(c);
+  t.repeat.set(2, 1);
+  return t;
 }
 
 export function grassTexture(seed = 3, size = 512, repeat = 1) {

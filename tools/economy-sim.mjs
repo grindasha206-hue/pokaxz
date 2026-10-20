@@ -7,7 +7,7 @@
 
 import { PLAYER, UPGRADES, BRANCHES } from '../src/config.js';
 import { createGame } from '../src/game.js';
-import { CONTAINER } from '../src/layout.js';
+import { CONTAINER, YARD } from '../src/layout.js';
 import { ON_GROUND, mulberry32 } from '../src/leaves.js';
 import { spentOn } from '../src/economy.js';
 
@@ -79,7 +79,7 @@ const strategies = {
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 const total = BRANCHES.reduce((s, b) => s + UPGRADES[b].prices.reduce((a, c) => a + c, 0), 0);
-console.log(`Листьев на участке: 600 (= 600 монет). Вся таблица прокачки: ${total} монет.\n`);
+console.log(`Листьев на участке: ${YARD.leafCount} (= ${YARD.leafCount} монет). Вся таблица прокачки: ${total} монет.\n`);
 console.log('стратегия'.padEnd(28), 'время', ' 1-я сдача', ' 1-я покупка', ' ходок', ' потрачено', ' уровни з/с/м');
 for (const [name, s] of Object.entries(strategies)) {
   const r = simulate(s);

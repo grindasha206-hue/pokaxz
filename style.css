@@ -28,6 +28,8 @@ kbd { display: inline-block; min-width: 1.6em; padding: 0 .35em; margin: 0 .12em
 #coins { position: absolute; top: 16px; left: 16px; display: flex; align-items: center; gap: 8px; padding: 6px 14px 6px 8px; font-size: 20px; }
 #coins b { font-variant-numeric: tabular-nums; min-width: 2ch; }
 #coins.pulse b { animation: pop .45s ease; }
+#coins .shop-hint { font-size: 12px; color: var(--muted); margin-left: 4px; }
+#coins .shop-hint kbd { font-size: 10px; }
 #coins-delta { color: var(--green); font-weight: 700; font-size: 16px; opacity: 0; }
 #coins-delta.show { animation: rise 1.2s ease forwards; }
 #coins-delta.minus { color: var(--accent-dark); }

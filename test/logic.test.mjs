@@ -2,17 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { ZONE, PLAYER, UPGRADES, BRANCHES } from '../src/config.js';
-import { generateLeaves, ON_GROUND, IN_BAG, SOLD, LEAF_MARGIN, mulberry32 } from '../src/leaves.js';
+import { generateLeaves, ON_GROUND, IN_BAG, SOLD, LEAF_EXTENT, mulberry32 } from '../src/leaves.js';
 import { Economy, spentOn } from '../src/economy.js';
-import { OBSTACLES, distToObstacle, isWalkable, segmentBlocked, surfaceHeight, resolveCircle } from '../src/layout.js';
+import { OBSTACLES, YARD, distToObstacle, isWalkable, segmentBlocked, surfaceHeight, resolveCircle } from '../src/layout.js';
+
+const LEAF_MARGIN = YARD.leafMargin;
 import { createGame } from '../src/game.js';
 import { buildSave, parseSave } from '../src/save.js';
 
 const fresh = () => createGame();
 
-test('генерация детерминирована и даёт 600 листьев', () => {
-  const a = generateLeaves(7, ZONE.leafCount), b = generateLeaves(7, ZONE.leafCount);
-  assert.equal(a.count, 600);
+test('генерация детерминирована и даёт заданное число листьев', () => {
+  const a = generateLeaves(7, YARD.leafCount), b = generateLeaves(7, YARD.leafCount);
+  assert.equal(a.count, YARD.leafCount);
   assert.deepEqual(Array.from(a.x), Array.from(b.x));
 });
 
@@ -193,4 +195,68 @@ test('подделанные деньги в сохранении исправл
 test('испорченное сохранение отклоняется с понятной ошибкой', () => {
   assert.throws(() => parseSave('{oops'), /не похож/);
   assert.throws(() => parseSave('{"version":999}'), /версия/);
+});
+
+test('листья лежат на земле или на других листьях: не висят и не уходят в землю', () => {
+  const { field: f } = fresh();
+  const tmp = [];
+  for (let i = 0; i < f.count; i++) {
+    const tilt = Math.max(Math.abs(f.tiltX[i]), Math.abs(f.tiltZ[i])) * f.flat[i];
+    // наклонённый край не ниже земли
+    assert.ok(f.lift[i] >= 0.5 * LEAF_EXTENT * f.scale[i] * Math.sin(tilt), `leaf ${i} sinks`);
+    // лист выше 1 см лежит на каком-то листе под ним
+    if (f.lift[i] > 0.01) {
+      const under = f.neighbours(i, tmp).filter((j) => j < i && f.state[j] === ON_GROUND);
+      assert.ok(under.length > 0, `leaf ${i} floats at ${f.lift[i]}`);
+    }
+  }
+});
+
+test('после сбора нижних листьев верхние опускаются', () => {
+  const { field: f, economy: e } = fresh();
+  // находим лист, лежащий на другом
+  let top = -1;
+  for (let i = 0; i < f.count && top < 0; i++) if (f.lift[i] > 0.012) top = i;
+  assert.ok(top >= 0, 'есть листья в несколько слоёв');
+  const before = f.lift[top];
+  const under = f.neighbours(top, []).filter((j) => j < top);
+  e.progress.upgrades.bag = 4;
+  e.collect(under);
+  f.settleAfter(under);
+  assert.ok(f.lift[top] < before, `${f.lift[top]} < ${before}`);
+  assert.ok(f.lift[top] <= 0.01, 'лёг на землю');
+});
+
+test('ходьба не сдвигает листья: позиции меняются только явным nudge', () => {
+  const { field: f } = fresh();
+  const x = Float32Array.from(f.x);
+  f.settleAll();
+  assert.deepEqual(Array.from(f.x), Array.from(x));
+});
+
+test('после загрузки высота слоёв та же, что при генерации', () => {
+  const g = fresh();
+  g.economy.collect([5, 6, 7]);
+  g.field.settleAfter([5, 6, 7]);
+  const g2 = createGame(parseSave(JSON.stringify(buildSave(g))));
+  for (let i = 0; i < g.field.count; i++) assert.ok(Math.abs(g2.field.lift[i] - g.field.lift[i]) < 1e-6, `leaf ${i}`);
+});
+
+test('сохранение прежней версии (600 листьев) переносит деньги и покупки', () => {
+  // v1: 600 листьев, 30 сдано, 5 в мешке, куплен захват (10)
+  const state = '2'.repeat(30) + '1'.repeat(5) + '0'.repeat(565);
+  const v1 = { version: 1, seed: 20261020, progress: { coins: 20, upgrades: { grab: 1, speed: 0, bag: 0 } },
+    zones: { yard: { state, pos: new Array(1800).fill(0) } } };
+  const g = createGame(parseSave(JSON.stringify(v1)));
+  assert.ok(g.migrated);
+  assert.equal(g.economy.progress.upgrades.grab, 1);
+  assert.equal(g.economy.coins, 35 - 10, 'сданные и лежавшие в мешке листья засчитаны');
+  assert.equal(g.economy.inBag, 0);
+  assert.equal(g.economy.remaining, g.field.count);
+  // и дальше сохраняется уже в новом формате без потерь
+  g.economy.collect([1, 2]); g.economy.deposit();
+  const g2 = createGame(parseSave(JSON.stringify(buildSave(g))));
+  assert.ok(!g2.migrated);
+  assert.equal(g2.economy.coins, 27);
+  assert.deepEqual(g2.fixes, []);
 });

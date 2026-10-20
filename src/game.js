@@ -17,12 +17,25 @@ export function createGame(save = null, opts = {}) {
   const field = generateLeaves(seed, count);
   let progress = newProgress();
   let fixes = [];
+  let migrated = false;
   if (save) {
-    if (!field.restore(save.zones[level.id])) throw new Error('Состояние двора в сохранении повреждено');
     progress = {
       coins: Number(save.progress.coins) || 0,
       upgrades: { ...newProgress().upgrades, ...save.progress.upgrades },
+      carry: Number(save.progress.carry) || 0,
     };
+    const zone = save.zones[level.id];
+    if (save.version === 1 || zone?.state?.length !== count) {
+      // Сохранение прежней раскладки двора (другое число листьев): листья раскладываются
+      // заново, а заработанное (сданные листья и листья в мешке) и покупки сохраняются.
+      const st = typeof zone?.state === 'string' ? zone.state : '';
+      let earned = 0;
+      for (const ch of st) if (ch === '1' || ch === '2') earned++;
+      progress.carry += earned;
+      migrated = true;
+    } else if (!field.restore(zone)) {
+      throw new Error('Состояние двора в сохранении повреждено');
+    }
   }
   const economy = new Economy(field, progress);
   if (save) fixes = economy.validate();
@@ -31,6 +44,7 @@ export function createGame(save = null, opts = {}) {
     field,
     economy,
     fixes,
+    migrated,
     openZones: save?.openZones ?? [level.id],
     hints: { ...newHints(), ...(save?.hints ?? {}) },
     settings: { ...DEFAULT_SETTINGS, ...(save?.settings ?? {}) },
