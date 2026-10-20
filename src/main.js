@@ -100,8 +100,10 @@ game.player = player;
 
 const keys = new Set();
 let state = 'start';            // start | playing | paused | shop | resume
-let pickRequested = false;      // короткое нажатие E
-let autoCollect = false;        // режим «включение одним нажатием»
+let pickRequested = false;      // короткое нажатие: клик или E
+let mouseHeld = false;          // левая кнопка удерживается — сбор повторяется
+let autoCollect = false;        // E в режиме «включает и выключает сбор»
+let ignoreClicksUntil = 0;      // клик, которым захватили курсор, не собирает листья
 let pick = null;                // { target, elapsed, duration }
 let hoverId = -1, hoverGroup = [];
 let fullHintUntil = 0, lastDenied = 0;
@@ -145,10 +147,24 @@ document.addEventListener('keydown', (e) => {
 });
 document.addEventListener('keyup', (e) => keys.delete(e.code));
 
+// Сбор — левой кнопкой (клик трекпада) по листу под точкой. Принимаем нажатие только
+// во время игры при захваченном курсоре: клики по блокноту, меню и клик захвата курсора
+// листья не собирают.
+const lookFallback = () => !canvas.requestPointerLock || DEBUG;
+document.addEventListener('mousedown', (e) => {
+  if (e.button !== 0 || state !== 'playing') return;
+  if (document.pointerLockElement !== canvas && !lookFallback()) return;
+  if (performance.now() < ignoreClicksUntil) return;
+  pickRequested = true;
+  mouseHeld = true;
+});
+document.addEventListener('mouseup', (e) => { if (e.button === 0) mouseHeld = false; });
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
 document.addEventListener('mousemove', (e) => {
   if (state !== 'playing') return;
   const locked = document.pointerLockElement === canvas;
-  if (!locked && !(e.buttons & 1)) return;
+  if (!locked && !(lookFallback() && e.buttons & 1)) return;
   let dx = e.movementX || 0, dy = e.movementY || 0;
   // Safari иногда присылает рывок при захвате курсора
   if (Math.abs(dx) > 300 || Math.abs(dy) > 300) return;
@@ -178,6 +194,9 @@ function showResume() {
 
 function enterPlaying() {
   state = 'playing';
+  ignoreClicksUntil = performance.now() + 300;
+  mouseHeld = false;
+  pickRequested = false;
   wantPlay = false;
   ui.show('start', false); ui.show('pause', false); ui.show('shop', false); ui.show('resume', false);
   ui.show('hud', true);
@@ -196,6 +215,7 @@ function stopWork() {
   keys.clear();
   pick = null;
   pickRequested = false;
+  mouseHeld = false;
   autoCollect = false;
   player.vx = player.vz = 0;
 }
@@ -255,10 +275,8 @@ document.getElementById('start-note').textContent = startNote;
 
 // ── действия ─────────────────────────────────────────────────
 function selectTool(n) {
-  if (n === 1) return;
-  const slot = document.querySelector(`.slot[data-tool="${n}"]`);
-  slot.classList.remove('flash'); void slot.offsetWidth; slot.classList.add('flash');
-  ui.toast(n === 2 ? 'Грабли появятся в следующей версии' : 'Воздуходувка появится в следующей версии', 1800);
+  // пока есть только рука; грабли и воздуходувка появятся в слотах 2 и 3
+  void n;
 }
 
 function nearest() {
@@ -380,7 +398,8 @@ function stillReachable(i) {
 }
 
 function updatePicking(dt) {
-  const want = pickRequested || autoCollect || (settings.collectMode === 'hold' && keys.has('KeyE'));
+  const held = mouseHeld || (settings.collectMode === 'hold' && keys.has('KeyE'));
+  const want = pickRequested || autoCollect || held;
   if (!pick) {
     hoverId = findHover();
     hoverGroup = groupFor(hoverId);
@@ -392,7 +411,7 @@ function updatePicking(dt) {
         pick = { target: hoverId, elapsed: 0, duration: economy.pickTime };
       }
       pickRequested = false;
-    } else if (want && hoverId < 0 && !keys.has('KeyE')) {
+    } else if (want && hoverId < 0 && !held) {
       // короткое нажатие мимо листа не «запоминается» навсегда
       pickRequested = false;
     }
@@ -451,35 +470,24 @@ function updateMovement(dt) {
   return Math.hypot(realVx, realVz);
 }
 
-// ── подсказки ────────────────────────────────────────────────
+// ── строка у счётчика мешка ──────────────────────────────────
+// В центре экрана только точка; действие у предмета и «мешок полон» — над счётчиком мешка.
 function updateHints() {
-  const h = game.hints;
-  let tip = '';
-  if (now < fullHintUntil && economy.free === 0) tip = 'Мешок полон — отнесите листья к контейнеру';
-  else if (!h.picked) tip = hoverId >= 0 || pick ? 'Нажмите E, чтобы подобрать лист' : 'Наведите прицел на лист';
-  else if (!h.deposited && economy.inBag > 0) tip = 'Сдать можно и неполный мешок: подойдите к зелёному контейнеру и нажмите F';
-  else if (h.deposited && !h.bought && economy.coins >= 10) tip = 'Нажмите Tab — в блокноте можно купить улучшение';
-  ui.tip(tip);
-
-  let prompt = '';
-  const near = nearest();
-  if (pick) prompt = '';
-  else if (hoverId >= 0 && (h.pickCount ?? 0) < 3) prompt = economy.free ? '<kbd>E</kbd> подобрать' : 'мешок полон';
-  else if (near === 'container') prompt = economy.inBag ? `<kbd>F</kbd> сдать ${economy.inBag} ${plural(economy.inBag, 'лист', 'листа', 'листьев')}` : 'Контейнер: мешок пуст';
-  else if (near === 'shop') prompt = '<kbd>F</kbd> открыть блокнот улучшений';
-  ui.prompt(prompt);
-
-  // указатель на контейнер, когда мешок полон
-  const full = economy.free === 0;
   const C = level.container;
-  const dCont = Math.hypot(C.x - player.x, C.z - player.z);
+  const full = economy.free === 0;
+  const near = nearest();
   world.container.arrow.visible = full;
-  if (full && dCont > 2.4) {
+  if (full && near !== 'container') {
     const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
     const rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
     const dx = C.x - player.x, dz = C.z - player.z;
-    ui.pointer(Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz));
-  } else ui.pointer(null);
+    const show = now < fullHintUntil || Math.hypot(dx, dz) > 2.4;
+    ui.bagNote(show ? 'Мешок полон — к контейнеру' : '', { full: true, angle: Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz) });
+  } else if (near === 'container' && economy.inBag > 0) {
+    ui.bagNote(`<kbd>F</kbd> сдать ${economy.inBag}`, { full });
+  } else if (near === 'shop') {
+    ui.bagNote('<kbd>F</kbd> блокнот улучшений');
+  } else ui.bagNote('');
 }
 
 // ── сохранение ───────────────────────────────────────────────
@@ -657,7 +665,7 @@ if (DEBUG) {
     setPickProgress(p) { if (pick) pick.elapsed = p * pick.duration; },
     hideHud(v) { ui.show('hud', !v); },
     slowmo(k) { timeScale = k; },
-    tip(t) { ui.tip(t); },
+    mouseState() { return { held: mouseHeld, requested: pickRequested }; },
   };
 }
 ui.show('hud', true);

@@ -5,15 +5,16 @@ import { level } from './layout.js';
 import { nextLevel } from './economy.js';
 
 const $ = (id) => document.getElementById(id);
-const RING_LEN = 106.8;
+const RING_LEN = 40.84; // длина окружности кольца у точки (r = 6.5)
 
 export class UI {
   constructor() {
     this.el = {
       hud: $('hud'), coins: $('coins'), coinsValue: $('coins-value'), coinsDelta: $('coins-delta'),
       zoneBar: $('zone-bar'), zoneValue: $('zone-value'), zoneLeft: $('zone-left'),
-      crosshair: $('crosshair'), ring: $('ring'), prompt: $('prompt'), tip: $('tip'), toast: $('toast'),
-      pointer: $('pointer'), pointerArrow: document.querySelector('#pointer .arrow'),
+      crosshair: $('crosshair'), ring: $('ring'), toast: $('toast'),
+      bagNote: $('bag-note'), bagNoteText: document.querySelector('#bag-note .text'),
+      bagNoteArrow: document.querySelector('#bag-note .arrow'),
       bag: $('bag'), bagValue: $('bag-value'), bagBar: $('bag-bar'), fps: $('fps'),
       start: $('start'), resume: $('resume'), pause: $('pause'), shop: $('shop'),
       shopRows: $('shop-rows'), shopCoins: $('shop-coins'), shopProgress: $('shop-progress'),
@@ -67,20 +68,6 @@ export class UI {
     this.el.ring.style.strokeDashoffset = off.toFixed(1);
   }
 
-  prompt(html) {
-    this.set('prompt', html, (v) => {
-      if (v) this.el.prompt.innerHTML = v;
-      this.el.prompt.classList.toggle('show', !!v);
-    });
-  }
-
-  tip(text) {
-    this.set('tip', text, (v) => {
-      if (v) this.el.tip.textContent = v;
-      this.el.tip.classList.toggle('show', !!v);
-    });
-  }
-
   toast(html, ms = 2600) {
     const t = this.el.toast;
     t.innerHTML = html;
@@ -89,11 +76,19 @@ export class UI {
     this.toastTimer = setTimeout(() => t.classList.remove('show'), ms);
   }
 
-  /** Указатель на контейнер: angle — угол относительно взгляда (рад), null — скрыть. */
-  pointer(angle) {
-    const show = angle !== null;
-    this.set('pointer', show, (v) => { this.el.pointer.hidden = !v; });
-    if (show) this.el.pointerArrow.style.transform = `rotate(${(angle - Math.PI / 2).toFixed(3)}rad)`;
+  /**
+   * Короткая строка над счётчиком мешка: «мешок полон» со стрелкой к контейнеру
+   * (angle — угол относительно взгляда, рад) или действие у предмета. null — скрыть.
+   */
+  bagNote(html, { full = false, angle = null } = {}) {
+    this.set('bagNote', `${html}|${full}`, () => {
+      this.el.bagNote.hidden = !html;
+      if (html) this.el.bagNoteText.innerHTML = html;
+      this.el.bagNote.classList.toggle('full', full);
+    });
+    const showArrow = angle !== null;
+    this.set('bagArrow', showArrow, (v) => { this.el.bagNoteArrow.hidden = !v; });
+    if (showArrow) this.el.bagNoteArrow.style.transform = `rotate(${(angle - Math.PI / 2).toFixed(3)}rad)`;
   }
 
   fps(text) {

@@ -19,24 +19,20 @@
     </div>
 
     <div id="crosshair">
-      <svg viewBox="0 0 44 44" width="44" height="44">
-        <circle class="track" cx="22" cy="22" r="17"></circle>
-        <circle id="ring" class="ring" cx="22" cy="22" r="17"></circle>
-        <circle class="dot" cx="22" cy="22" r="2.4"></circle>
+      <svg viewBox="0 0 20 20" width="20" height="20">
+        <circle id="ring" class="ring" cx="10" cy="10" r="6.5"></circle>
+        <circle class="dot" cx="10" cy="10" r="2.2"></circle>
       </svg>
     </div>
-    <div id="prompt"></div>
-    <div id="tip"></div>
     <div id="toast"></div>
-    <div id="pointer" hidden><span class="arrow">➜</span><span>контейнер</span></div>
 
     <div id="bottom">
       <div id="tools">
-        <div class="slot active" data-tool="1"><kbd>1</kbd>Рука</div>
-        <div class="slot locked" data-tool="2"><kbd>2</kbd>Грабли</div>
-        <div class="slot locked" data-tool="3"><kbd>3</kbd>Воздуходувка</div>
+        <!-- грабли и воздуходувка появятся здесь, когда станут доступны -->
+        <div class="slot active" data-tool="1">Рука</div>
       </div>
       <div id="bag" class="chip">
+        <div id="bag-note" hidden><span class="arrow" hidden>➜</span><span class="text"></span></div>
         <span class="bag-icon"></span>
         <b id="bag-value">0 / 20</b>
         <span class="bar"><i id="bag-bar"></i></span>
@@ -50,12 +46,11 @@
       <h1>Осенний двор</h1>
       <p class="lead">Соберите листья, сдайте их в контейнер и улучшите инструменты.</p>
       <ul class="keys">
-        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> идти</li>
-        <li>трекпад — осмотреться</li>
-        <li><kbd>E</kbd> подобрать лист (удерживайте, чтобы собирать подряд)</li>
-        <li><kbd>F</kbd> сдать листья, открыть блокнот</li>
-        <li><kbd>Tab</kbd> улучшения и прогресс · <kbd>Esc</kbd> пауза</li>
+        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> идти · трекпад — осмотреться</li>
+        <li>клик — подобрать лист под точкой, удержание — собирать подряд</li>
+        <li><kbd>F</kbd> у контейнера — сдать листья · <kbd>Tab</kbd> улучшения · <kbd>Esc</kbd> пауза</li>
       </ul>
+      <p class="note">Все подсказки — в меню паузы, раздел «Управление».</p>
       <button id="start-btn" class="primary">Начать</button>
       <p id="start-note" class="note"></p>
     </div>
@@ -69,14 +64,28 @@
     <div class="card wide">
       <h2>Пауза</h2>
       <button id="resume-btn" class="primary">Продолжить</button>
-      <section class="settings">
+      <section class="controls">
         <h3>Управление</h3>
+        <ul class="keys">
+          <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — идти, трекпад — осмотреться</li>
+          <li><b>Клик</b> по листу под точкой — подобрать. Захват берёт и соседние листья, если он улучшен</li>
+          <li><b>Удержание</b> кнопки — собирать подряд с текущей скоростью; отпустите, чтобы остановиться</li>
+          <li><kbd>E</kbd> — то же, что клик (можно удерживать)</li>
+          <li><kbd>F</kbd> у зелёного контейнера — сдать листья, можно и неполный мешок; у стола — открыть блокнот</li>
+          <li><kbd>Tab</kbd> — блокнот улучшений и прогресс; клики в блокноте листья не собирают</li>
+          <li><kbd>Esc</kbd> — пауза и свободный курсор</li>
+        </ul>
+        <p class="note">Точка в центре светлеет, когда под ней лист, который можно подобрать. Вокруг неё
+          появляется тонкое кольцо, пока лист собирается. Когда мешок полон, у счётчика мешка появится стрелка к контейнеру.</p>
+      </section>
+      <section class="settings">
+        <h3>Настройки управления</h3>
         <label>Чувствительность обзора <input id="set-sens" type="range" min="0.25" max="3" step="0.05"><output id="out-sens"></output></label>
         <label class="check"><input id="set-invert" type="checkbox"> Инвертировать вертикаль</label>
-        <label>Сбор на <kbd>E</kbd>
+        <label>Клавиша <kbd>E</kbd>
           <select id="set-mode">
-            <option value="hold">удержание</option>
-            <option value="toggle">включение одним нажатием</option>
+            <option value="hold">как кнопка: нажатие и удержание</option>
+            <option value="toggle">включает и выключает сбор</option>
           </select>
         </label>
         <h3>Звук</h3>
