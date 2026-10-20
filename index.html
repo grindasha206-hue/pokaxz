@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Осенний двор</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <div id="hud" hidden>
+    <div id="coins" class="chip"><span class="coin-icon"></span><b id="coins-value">0</b><span id="coins-delta"></span></div>
+    <div id="zone" class="chip">
+      <span id="zone-name">Двор</span>
+      <span class="bar"><i id="zone-bar"></i></span>
+      <b id="zone-value">0 %</b>
+      <small id="zone-left"></small>
+    </div>
+
+    <div id="crosshair">
+      <svg viewBox="0 0 44 44" width="44" height="44">
+        <circle class="track" cx="22" cy="22" r="17"></circle>
+        <circle id="ring" class="ring" cx="22" cy="22" r="17"></circle>
+        <circle class="dot" cx="22" cy="22" r="2.4"></circle>
+      </svg>
+    </div>
+    <div id="prompt"></div>
+    <div id="tip"></div>
+    <div id="toast"></div>
+    <div id="pointer" hidden><span class="arrow">➜</span><span>контейнер</span></div>
+
+    <div id="bottom">
+      <div id="tools">
+        <div class="slot active" data-tool="1"><kbd>1</kbd>Рука</div>
+        <div class="slot locked" data-tool="2"><kbd>2</kbd>Грабли</div>
+        <div class="slot locked" data-tool="3"><kbd>3</kbd>Воздуходувка</div>
+      </div>
+      <div id="bag" class="chip">
+        <span class="bag-icon"></span>
+        <b id="bag-value">0 / 20</b>
+        <span class="bar"><i id="bag-bar"></i></span>
+      </div>
+    </div>
+    <div id="fps" hidden></div>
+  </div>
+
+  <div id="start" class="overlay">
+    <div class="card">
+      <h1>Осенний двор</h1>
+      <p class="lead">Соберите листья, сдайте их в контейнер и улучшите инструменты.</p>
+      <ul class="keys">
+        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> идти</li>
+        <li>трекпад — осмотреться</li>
+        <li><kbd>E</kbd> подобрать лист (удерживайте, чтобы собирать подряд)</li>
+        <li><kbd>F</kbd> сдать листья, открыть блокнот</li>
+        <li><kbd>Tab</kbd> улучшения и прогресс · <kbd>Esc</kbd> пауза</li>
+      </ul>
+      <button id="start-btn" class="primary">Начать</button>
+      <p id="start-note" class="note"></p>
+    </div>
+  </div>
+
+  <div id="resume" class="overlay" hidden>
+    <div class="card small"><p>Нажмите, чтобы продолжить</p></div>
+  </div>
+
+  <div id="pause" class="overlay" hidden>
+    <div class="card wide">
+      <h2>Пауза</h2>
+      <button id="resume-btn" class="primary">Продолжить</button>
+      <section class="settings">
+        <h3>Управление</h3>
+        <label>Чувствительность обзора <input id="set-sens" type="range" min="0.25" max="3" step="0.05"><output id="out-sens"></output></label>
+        <label class="check"><input id="set-invert" type="checkbox"> Инвертировать вертикаль</label>
+        <label>Сбор на <kbd>E</kbd>
+          <select id="set-mode">
+            <option value="hold">удержание</option>
+            <option value="toggle">включение одним нажатием</option>
+          </select>
+        </label>
+        <h3>Звук</h3>
+        <label>Общая громкость <input id="set-vol-master" type="range" min="0" max="1" step="0.05"></label>
+        <label>Эффекты <input id="set-vol-effects" type="range" min="0" max="1" step="0.05"></label>
+        <label>Фон <input id="set-vol-ambient" type="range" min="0" max="1" step="0.05"></label>
+        <h3>Изображение</h3>
+        <label class="check"><input id="set-highlight" type="checkbox"> Подсвечивать последние листья</label>
+        <label class="check"><input id="set-shadows" type="checkbox"> Тени</label>
+        <label class="check"><input id="set-fps" type="checkbox"> Показывать частоту кадров</label>
+      </section>
+      <section class="saves">
+        <h3>Сохранение</h3>
+        <p class="note" id="save-status"></p>
+        <div class="row">
+          <button id="export-btn">Экспорт в файл</button>
+          <button id="import-btn">Восстановить из файла</button>
+          <input id="import-file" type="file" accept="application/json,.json" hidden>
+        </div>
+        <div class="row">
+          <button id="reset-btn" class="danger">Сбросить прогресс…</button>
+          <span id="reset-confirm" hidden>
+            Весь прогресс будет удалён.
+            <button id="reset-yes" class="danger">Да, сбросить</button>
+            <button id="reset-no">Отмена</button>
+          </span>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="shop" class="overlay" hidden>
+    <div class="notebook">
+      <div class="rings"></div>
+      <header>
+        <h2>Блокнот улучшений</h2>
+        <div class="purse"><span class="coin-icon"></span><b id="shop-coins">0</b></div>
+      </header>
+      <div id="shop-rows"></div>
+      <h3>Инструменты</h3>
+      <div class="tools-list">
+        <div><b>Рука</b> — точный сбор прямо в мешок <span class="tag ok">в руке</span></div>
+        <div class="dim"><b>Грабли</b> — стягивают листья в кучу <span class="tag">позже</span></div>
+        <div class="dim"><b>Воздуходувка</b> — гонит листья к приёмнику <span class="tag">позже</span></div>
+      </div>
+      <h3>Прогресс</h3>
+      <div id="shop-progress"></div>
+      <footer><kbd>Tab</kbd> — закрыть и вернуться к уборке</footer>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

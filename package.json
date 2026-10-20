@@ -1,0 +1,10 @@
+{
+  "name": "leaf-yard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "test": "node --test test/*.test.mjs",
+    "economy": "node tools/economy-sim.mjs"
+  }
+}
