@@ -665,6 +665,7 @@ if (DEBUG) {
     setPickProgress(p) { if (pick) pick.elapsed = p * pick.duration; },
     hideHud(v) { ui.show('hud', !v); },
     slowmo(k) { timeScale = k; },
+    advance(sec) { now += sec; }, // при slowmo(0): шаг времени для съёмки анимаций по кадрам
     mouseState() { return { held: mouseHeld, requested: pickRequested }; },
   };
 }

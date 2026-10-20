@@ -32,9 +32,12 @@ await page.evaluate(() => { window.__dvor.startPick(); });
 await page.waitForTimeout(200);
 await page.evaluate(() => window.__dvor.setPickProgress(0.85));
 await shot('f4-pick', 300);
-await page.evaluate(() => { window.__dvor.slowmo(0.6); window.__dvor.setPickProgress(1); });
+// время останавливаем и двигаем вручную: так полёт снимается в нужные моменты
+await page.evaluate(() => { window.__dvor.slowmo(0); window.__dvor.setPickProgress(1); window.__dvor.advance(0.001); });
 await page.waitForFunction(() => window.__dvor.economy.inBag > 0, null, { timeout: 60000 });
-await shot('f5-flight', 2000);
-await shot('f6-flight-late', 3000);
+await page.evaluate(() => window.__dvor.advance(0.18));
+await shot('f5-flight', 2500);
+await page.evaluate(() => window.__dvor.advance(0.17));
+await shot('f6-flight-late', 2500);
 console.log(errors.length ? errors.join('\n') : 'no errors');
 await browser.close();
