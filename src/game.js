@@ -2,7 +2,7 @@
 
 import { generateLeaves } from './leaves.js';
 import { Economy, newProgress } from './economy.js';
-import { DEFAULT_SETTINGS } from './save.js';
+import { DEFAULT_SETTINGS, isLegacySave } from './save.js';
 import { level } from './layout.js';
 
 export const DEFAULT_SEED = 20261020;
@@ -17,34 +17,23 @@ export function createGame(save = null, opts = {}) {
   const field = generateLeaves(seed, count);
   let progress = newProgress();
   let fixes = [];
-  let migrated = false;
   if (save) {
+    if (isLegacySave(save)) throw new Error('Сохранение прежней экономики (монеты) — см. isLegacySave');
+    const p = save.progress;
     progress = {
-      coins: Number(save.progress.coins) || 0,
-      upgrades: { ...newProgress().upgrades, ...save.progress.upgrades },
-      carry: Number(save.progress.carry) || 0,
+      money: p.money, earned: p.earned,
+      upgrades: { ...newProgress().upgrades, ...p.upgrades },
+      bonuses: Array.isArray(p.bonuses) ? [...p.bonuses] : [],
     };
-    const zone = save.zones[level.id];
-    if (save.version === 1 || zone?.state?.length !== count) {
-      // Сохранение прежней раскладки двора (другое число листьев): листья раскладываются
-      // заново, а заработанное (сданные листья и листья в мешке) и покупки сохраняются.
-      const st = typeof zone?.state === 'string' ? zone.state : '';
-      let earned = 0;
-      for (const ch of st) if (ch === '1' || ch === '2') earned++;
-      progress.carry += earned;
-      migrated = true;
-    } else if (!field.restore(zone)) {
-      throw new Error('Состояние двора в сохранении повреждено');
-    }
+    if (!field.restore(save.zones[level.id])) throw new Error('Состояние двора в сохранении повреждено');
   }
-  const economy = new Economy(field, progress);
+  const economy = new Economy(field, progress, level.rewards ?? []);
   if (save) fixes = economy.validate();
   return {
     seed,
     field,
     economy,
     fixes,
-    migrated,
     openZones: save?.openZones ?? [level.id],
     hints: { ...newHints(), ...(save?.hints ?? {}) },
     settings: { ...DEFAULT_SETTINGS, ...(save?.settings ?? {}) },

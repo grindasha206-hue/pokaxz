@@ -39,7 +39,7 @@ const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const EYE_TARGET = new THREE.Vector3(0, -0.11, -0.32); // куда летит лист — чуть ниже центра взгляда
 
 function leafGeometry() {
-  const geo = new THREE.PlaneGeometry(1, 1, 6, 6);
+  const geo = new THREE.PlaneGeometry(1, 1, 4, 4); // 32 треугольника: изгибы плавные, а листьев тысячи
   geo.rotateX(-Math.PI / 2); // плоскость XZ, нормаль +Y; после поворота −Z — к кончику листа
   const pos = geo.attributes.position, uv = geo.attributes.uv;
   for (let i = 0; i < pos.count; i++) {

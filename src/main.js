@@ -1,11 +1,11 @@
 // Точка входа: сцена, управление, цикл игры, сохранение.
 
 import * as THREE from '../vendor/three.module.min.js';
-import { PLAYER, UPGRADES, REMAINING_HIGHLIGHT, ZONE, plural } from './config.js';
+import { PLAYER, UPGRADES, REMAINING_HIGHLIGHT, ZONE, LEGACY_BACKUP_KEY, formatGain, plural } from './config.js';
 import { level, setLevel, distToObstacle, resolveCircle, segmentBlocked, surfaceHeight } from './layout.js';
 import { ON_GROUND } from './leaves.js';
 import { createGame } from './game.js';
-import { buildSave, parseSave, readLocal, writeLocal, clearLocal } from './save.js';
+import { buildSave, parseSave, readLocal, readLocalRaw, writeLocal, clearLocal, isLegacySave } from './save.js';
 import { buildWorld } from './view/scene.js';
 import { Ground } from './view/ground.js';
 import { LeafView, loadLeafTextures } from './view/leafView.js';
@@ -30,13 +30,18 @@ const sound = new Sound();
 
 // ── загрузка ─────────────────────────────────────────────────
 let game, startNote = '';
+// Сохранение прежней экономики (монеты): до выбора игрока ничего не перезаписываем.
+let legacyText = null, legacyPending = false;
 {
-  const saved = NO_SAVE ? null : readLocal();
+  let saved = NO_SAVE ? null : readLocal();
+  if (saved && isLegacySave(saved)) {
+    legacyText = readLocalRaw();
+    legacyPending = true;
+    saved = null;
+  }
   try {
     game = createGame(saved, { leafCount: LEAF_OVERRIDE ?? undefined });
-    if (saved) startNote = game.migrated
-      ? 'Двор обновился: листья разложены заново, заработанные монеты и покупки сохранены.'
-      : 'Продолжаем с сохранения.';
+    if (saved) startNote = 'Продолжаем с сохранения.';
     if (game.fixes.length) console.warn('save fixes', game.fixes);
   } catch (e) {
     console.warn(e);
@@ -291,6 +296,32 @@ document.getElementById('resume').addEventListener('click', () => { sound.unlock
 canvas.addEventListener('click', () => { if (state === 'resume') { wantPlay = true; requestLock(); } });
 document.getElementById('start-note').textContent = startNote;
 
+// ── прежнее сохранение: экспорт или новый старт с подтверждением ─────────────
+function downloadText(text, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+if (legacyPending) {
+  const startBtn = document.getElementById('start-btn');
+  document.getElementById('legacy').hidden = false;
+  startBtn.disabled = true;
+  document.getElementById('legacy-export').addEventListener('click', () => downloadText(legacyText, 'osenniy-dvor-old-coins-save.json'));
+  const confirmRow = document.getElementById('legacy-confirm');
+  document.getElementById('legacy-new').addEventListener('click', () => { confirmRow.hidden = false; });
+  document.getElementById('legacy-no').addEventListener('click', () => { confirmRow.hidden = true; });
+  document.getElementById('legacy-yes').addEventListener('click', () => {
+    try { localStorage.setItem(LEGACY_BACKUP_KEY, legacyText); } catch { /* копия не обязательна: файл можно экспортировать */ }
+    legacyPending = false;
+    saveNow(); // новое сохранение заменяет прежнее
+    document.getElementById('legacy').hidden = true;
+    startBtn.disabled = false;
+    document.getElementById('start-note').textContent = 'Новая игра: $0,00. Копия прежнего сохранения осталась в браузере.';
+  });
+}
+
 // ── действия ─────────────────────────────────────────────────
 function selectTool(n) {
   // пока есть только рука; грабли и воздуходувка появятся в слотах 2 и 3
@@ -329,14 +360,14 @@ function deposit() {
   }
   const n = economy.deposit();
   sound.deposit(n);
-  ui.coins(economy.coins, n);
+  ui.money(economy.money, economy.lastGain);
   ui.bag(economy.inBag, economy.capacity, true);
   const C = level.container;
   camera.localToWorld(tmpFrom.set(0.12, -0.3, -0.45));
   leaves.depositBurst(tmpFrom, tmpV.set(C.x, C.h + 0.1, C.z), n, now);
   lidOpenUntil = now + 0.9;
   if (!game.hints.deposited) game.hints.deposited = true;
-  ui.toast(`Сдано ${n} ${plural(n, 'лист', 'листа', 'листьев')}: <b>+${n}</b> ${plural(n, 'монета', 'монеты', 'монет')}`, 2000);
+  ui.toast(`Сдано ${n} ${plural(n, 'лист', 'листа', 'листьев')}: <b>${formatGain(economy.lastGain)}</b>`, 2000);
   if (economy.remaining === 0) {
     setTimeout(() => ui.toast('Двор чист! Сад откроется в следующей версии игры.', 5000), 2100);
   }
@@ -348,11 +379,11 @@ function buy(branch, btn) {
   const t = performance.now();
   if (t - (buyLock.get(branch) ?? 0) < 250) return; // защита от двойного клика
   buyLock.set(branch, t);
-  const before = economy.coins;
+  const before = economy.money;
   const res = economy.buy(branch);
   if (!res) { sound.denied(); btn?.classList.add('flash'); return; }
   sound.purchase();
-  ui.coins(economy.coins, economy.coins - before);
+  ui.money(economy.money, economy.money - before);
   ui.bag(economy.inBag, economy.capacity);
   game.hints.bought = true;
   const u = UPGRADES[branch];
@@ -445,6 +476,11 @@ function updatePicking(dt) {
         leaves.flyToCamera(got, now);
         leaves.settle(field.settleAfter(got), got); // лежавшие сверху опускаются, а не висят
         sound.rustle(got.length);
+        // награды зоны: выдаются один раз и сразу сохраняются
+        for (const r of economy.checkRewards()) {
+          setTimeout(() => ui.toast(`${level.name} убран на ${Math.round(r.at * 100)} %: <b>${r.text}</b>`, 3600), 400);
+          saveNow();
+        }
         ui.bag(economy.inBag, economy.capacity, true);
         game.hints.picked = true;
         game.hints.pickCount = (game.hints.pickCount ?? 0) + 1;
@@ -512,7 +548,7 @@ function updateHints() {
 // ── сохранение ───────────────────────────────────────────────
 let skipSave = false;
 function saveNow() {
-  if (NO_SAVE || skipSave) return;
+  if (NO_SAVE || skipSave || legacyPending) return;
   const ok = writeLocal(buildSave(game));
   dirty = false;
   lastSave = now;
@@ -543,6 +579,11 @@ importInput.addEventListener('change', async () => {
   }
   try {
     const data = parseSave(await file.text());
+    if (isLegacySave(data)) {
+      status.textContent = 'Это сохранение прежней версии (монеты). В новую экономику оно не загружается — храните файл как архив.';
+      importInput.value = '';
+      return;
+    }
     createGame(data); // проверка, что сохранение загружается
     // пишем и сразу читаем обратно: перезагружаемся, только если запись действительно удалась
     const written = writeLocal(data);
@@ -634,7 +675,7 @@ function frame(t) {
   leaves.setHighlight(pick ? pick.target : hoverId, pick ? groupFor(pick.target) : hoverGroup);
   updateHints();
   ui.crosshair(hoverId >= 0 || !!pick, pick ? Math.min(1, pick.elapsed / pick.duration) : null);
-  ui.coins(economy.coins);
+  ui.money(economy.money);
   ui.bag(economy.inBag, economy.capacity);
   ui.zone(economy.cleanedRatio, economy.remaining);
 

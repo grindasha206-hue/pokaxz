@@ -10,7 +10,7 @@
   <canvas id="view"></canvas>
 
   <div id="hud" hidden>
-    <div id="coins" class="chip"><span class="coin-icon"></span><b id="coins-value">0</b><span id="coins-delta"></span><span class="shop-hint"><kbd>Tab</kbd> улучшения</span></div>
+    <div id="coins" class="chip"><span class="coin-icon"></span><b id="coins-value">$0,00</b><span id="coins-delta"></span><span class="shop-hint"><kbd>Tab</kbd> улучшения</span></div>
     <div id="zone" class="chip">
       <span id="zone-name">Двор</span>
       <span class="bar"><i id="zone-bar"></i></span>
@@ -51,6 +51,19 @@
         <li><kbd>F</kbd> у контейнера — сдать листья · <kbd>Tab</kbd> улучшения · <kbd>Esc</kbd> пауза</li>
       </ul>
       <p class="note">Все подсказки — в меню паузы, раздел «Управление».</p>
+      <div id="legacy" class="legacy" hidden>
+        <p><b>Найдено сохранение прежней версии</b> — с монетами. Теперь деньги считаются в долларах и цены
+          другие, поэтому монеты не пересчитываются: прежний прогресс в новую экономику не переносится.</p>
+        <div class="row">
+          <button id="legacy-export">Экспортировать прежний прогресс</button>
+          <button id="legacy-new" class="danger">Начать заново с $0,00…</button>
+        </div>
+        <div id="legacy-confirm" class="row" hidden>
+          Прежнее сохранение будет заменено (его копия останется в браузере).
+          <button id="legacy-yes" class="danger">Да, начать заново</button>
+          <button id="legacy-no">Отмена</button>
+        </div>
+      </div>
       <button id="start-btn" class="primary">Начать</button>
       <p id="start-note" class="note"></p>
     </div>
@@ -122,14 +135,13 @@
       <div class="rings"></div>
       <header>
         <h2>Блокнот улучшений</h2>
-        <div class="purse"><span class="coin-icon"></span><b id="shop-coins">0</b></div>
+        <div class="purse"><span class="coin-icon"></span><b id="shop-coins">$0,00</b></div>
       </header>
       <div id="shop-rows"></div>
       <h3>Инструменты</h3>
       <div class="tools-list">
-        <div><b>Рука</b> — точный сбор прямо в мешок <span class="tag ok">в руке</span></div>
-        <div class="dim"><b>Грабли</b> — стягивают листья в кучу <span class="tag">позже</span></div>
-        <div class="dim"><b>Воздуходувка</b> — гонит листья к приёмнику <span class="tag">позже</span></div>
+        <div><b>Рука</b> — точный сбор прямо в мешок; удержание кнопки бесплатно <span class="tag ok">в руке</span></div>
+        <div id="locked-tools"></div>
       </div>
       <h3>Прогресс</h3>
       <div id="shop-progress"></div>

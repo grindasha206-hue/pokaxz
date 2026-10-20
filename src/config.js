@@ -1,36 +1,85 @@
 // Игровые константы и таблицы прокачки.
 // Модуль чистый (без three.js), чтобы его можно было проверять в node.
 
+// ── деньги ───────────────────────────────────────────────────
+// Доллары храним целыми единицами по $0,0001, чтобы цены списывались точно,
+// а дробный остаток от продажи листьев не терялся.
+export const UNITS_PER_DOLLAR = 10000;
+export const usd = (d) => Math.round(d * UNITS_PER_DOLLAR);
+
+// Цена листа: $0,004 (настройка баланса нашей версии). Каждый бонус зоны: +25 % базовой цены.
+export const LEAF_VALUE = 40;  // $0,004
+export const LEAF_BONUS = 10;  // +$0,001 за бонус
+
+// Таблицы улучшений — по таблице Leaf it Alone. values[0] — начальная характеристика,
+// prices[i] — цена перехода на уровень i + 1; каждая ступень покупается отдельно и по порядку.
+// Удержание кнопки для сбора бесплатно с начала (Fluid Picker не продаётся).
 export const UPGRADES = {
   grab: {
-    title: 'Захват',
+    title: 'Жадная хватка',
+    hint: 'листьев за один подбор',
     unit: (v) => `${v} ${plural(v, 'лист', 'листа', 'листьев')}`,
     values: [1, 2, 3, 5, 7, 10],
-    prices: [10, 40, 120, 280, 550],
+    prices: [0.10, 0.50, 1.75, 3.50, 5.75].map(usd),
   },
   speed: {
-    title: 'Скорость',
-    unit: (v) => `${v.toFixed(1).replace('.', ',')} с`,
-    values: [0.6, 0.5, 0.4, 0.3, 0.2],
-    prices: [15, 60, 180, 450],
+    title: 'Ловкость',
+    hint: 'время подбора',
+    unit: (v) => `${v.toFixed(2).replace('.', ',')} с`,
+    values: [0.5, 0.43, 0.37, 0.31, 0.25, 0.2],
+    prices: [0.25, 0.75, 1.50, 2.75, 4.50].map(usd),
   },
   bag: {
     title: 'Мешок',
+    hint: 'вместимость',
     unit: (v) => `${v} ${plural(v, 'лист', 'листа', 'листьев')}`,
-    values: [20, 50, 100, 200, 500],
-    prices: [20, 80, 220, 600],
+    values: [50, 200, 500],
+    levelNames: ['обычный', 'средний', 'большой'],
+    prices: [0.75, 3.49].map(usd),
   },
 };
 
 export const BRANCHES = Object.keys(UPGRADES);
 
-export const COINS_PER_LEAF = 1;
+// Инструменты из таблицы, которых в игре ещё нет: показываются в блокноте, но не продаются.
+export const LOCKED_TOOLS = [
+  {
+    title: 'Грабли', price: usd(7.49), info: 'сгребать листья в кучи и в приёмники',
+    upgrades: [
+      { title: 'Длина черенка', prices: [3.50, 6.00, 8.50, 11.00].map(usd), info: 'до 2,2 м, дальность до 0,7 м' },
+      { title: 'Ширина захвата', prices: [4.00, 6.75, 9.50, 12.25, 14.00].map(usd), info: '0,45 → 0,6 м' },
+      { title: 'Цепкость листьев', prices: [5.00, 6.50, 8.00, 9.50].map(usd), info: '0,8 → 1' },
+    ],
+  },
+  {
+    title: 'Воздуходувка', price: usd(49.99), info: 'гнать листья по двору и в приёмники',
+    upgrades: [
+      { title: 'Ширина потока', prices: [28, 35, 40, 46, 50].map(usd), info: '0,55 → 0,75 м' },
+      { title: 'Мощность', prices: [15, 20, 24, 27].map(usd), info: 'до 2400 Вт, запуск 0,2 с' },
+      { title: 'Точность', prices: [10, 16, 21, 25].map(usd), info: 'разброс 0,48 → 0,12' },
+    ],
+  },
+];
+
+/** $1234,5678 → «$1234,56»: всегда два знака, дробь отбрасывается (не завышаем баланс). */
+export function formatMoney(units) {
+  const u = Math.max(0, Math.floor(units));
+  const cents = Math.floor(u / 100);
+  return `$${Math.floor(cents / 100)},${String(cents % 100).padStart(2, '0')}`;
+}
+
+/** Доход для сообщения: «+$0,20»; меньше цента — «+<$0,01» (сам остаток сохраняется). */
+export function formatGain(units) {
+  if (units > 0 && units < 100) return '+<$0,01';
+  return '+' + formatMoney(units);
+}
+
 
 // Участок прототипа
 export const ZONE = {
   id: 'yard',
   name: 'Двор',
-  leafCount: 2500,
+  leafCount: 6400, // см. README «Экономика»: хватает на всю доступную прокачку ($25,59) с запасом
   // границы участка (метры, мир XZ): с севера дом, с остальных сторон забор
   minX: -8, maxX: 8, minZ: -9, maxZ: 7,
 };
@@ -50,8 +99,10 @@ export const GRAB_RADIUS = 2.4;
 export const REMAINING_HIGHLIGHT = 12;
 
 export const SAVE_KEY = 'leaf-yard-save-v1';
-export const SAVE_VERSION = 2;
-// v1 — двор из 600 листьев; при загрузке переносятся деньги и покупки (см. game.js)
+export const SAVE_VERSION = 3;
+// v1, v2 — прежняя экономика в монетах. Такие сохранения не пересчитываются в доллары:
+// игра предлагает экспортировать их и начать заново (см. isLegacySave, main.js).
+export const LEGACY_BACKUP_KEY = 'leaf-yard-save-legacy-backup';
 
 export function plural(n, one, few, many) {
   const m10 = n % 10, m100 = n % 100;

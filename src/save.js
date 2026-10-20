@@ -36,11 +36,24 @@ export function parseSave(text) {
   let data;
   try { data = typeof text === 'string' ? JSON.parse(text) : text; } catch { throw new Error('Файл не похож на сохранение'); }
   if (!data || typeof data !== 'object') throw new Error('Файл не похож на сохранение');
-  if (data.version !== SAVE_VERSION && data.version !== 1) throw new Error(`Неизвестная версия сохранения: ${data.version}`);
+  if (![1, 2, SAVE_VERSION].includes(data.version)) throw new Error(`Неизвестная версия сохранения: ${data.version}`);
   if (!Number.isInteger(data.seed)) throw new Error('В сохранении нет зерна участка');
   if (!data.progress || !data.progress.upgrades) throw new Error('В сохранении нет покупок');
   if (!data.zones || !data.zones[level.id]) throw new Error('В сохранении нет состояния двора');
   return data;
+}
+
+/**
+ * Сохранение прежней экономики (версии 1–2, монеты). Монеты не пересчитываются в доллары
+ * один к одному: игра предлагает экспортировать такой прогресс и начать заново.
+ */
+export function isLegacySave(data) {
+  return !!data && data.version !== SAVE_VERSION;
+}
+
+/** Исходный текст сохранения из хранилища (для экспорта прежнего прогресса). */
+export function readLocalRaw(storage = globalThis.localStorage) {
+  try { return storage.getItem(SAVE_KEY); } catch { return null; }
 }
 
 export function readLocal(storage = globalThis.localStorage) {

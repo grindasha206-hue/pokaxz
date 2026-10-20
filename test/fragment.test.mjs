@@ -34,12 +34,13 @@ test('фрагмент: плотный слой листьев без попад
       assert.ok(ok, `leaf ${i} unreachable`);
     }
     // экономика та же: мешок, сдача, покупки
-    e.collect(Array.from({ length: 30 }, (_, i) => i));
-    assert.equal(e.inBag, 20);
-    assert.equal(f.countState(IN_BAG), 20);
-    assert.equal(e.deposit(), 20);
+    e.collect(Array.from({ length: 60 }, (_, i) => i));
+    assert.equal(e.inBag, 50);
+    assert.equal(f.countState(IN_BAG), 50);
+    assert.equal(e.deposit(), 50);
+    assert.equal(e.money, 2000); // $0,20
     assert.ok(e.buy('grab'));
-    assert.equal(e.coins, 10);
+    assert.equal(e.money, 1000);
   } finally {
     setLevel(YARD);
   }

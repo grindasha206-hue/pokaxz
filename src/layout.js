@@ -85,8 +85,13 @@ function yardDensity(x, z, noise, drift) {
 export const YARD = {
   id: 'yard',
   name: 'Двор',
-  leafCount: 2500,      // см. README: экономика и производительность
+  leafCount: ZONE.leafCount,
   zone: ZONE,
+  // награды зоны (как в Leaf it Alone): выдаются один раз и сохраняются
+  rewards: [
+    { id: 'yard-50', at: 0.5, leafBonus: 1, text: 'цена листа +25 %' },
+    { id: 'yard-100', at: 1, leafBonus: 0, text: 'сад откроется в следующей версии' },
+  ],
   inset: T,
   obstacles: OBSTACLES,
   spawn: SPAWN,
@@ -156,6 +161,7 @@ export const FRAGMENT = {
   name: FZ.name,
   leafCount: FZ.leafCount,
   zone: FZ,
+  rewards: [{ id: 'fragment-50', at: 0.5, leafBonus: 1, text: 'цена листа +25 %' }],
   inset: 0,
   obstacles: FRAGMENT_OBSTACLES,
   spawn: { x: -2.2, z: 2.4, yaw: -0.7 },

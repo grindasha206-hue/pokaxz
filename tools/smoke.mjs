@@ -18,7 +18,7 @@ await page.goto(`${base}?debug`);
 await page.evaluate(() => localStorage.clear());
 await page.goto(`${base}?debug`);
 await page.waitForFunction(() => window.__dvor);
-const st = () => page.evaluate(() => { const e = window.__dvor.economy; return { bag: e.inBag, coins: e.coins, sold: e.sold, grab: e.grab }; });
+const st = () => page.evaluate(() => { const e = window.__dvor.economy; return { bag: e.inBag, money: e.money, sold: e.sold, grab: e.grab }; });
 await page.evaluate(() => window.__dvor.play());
 
 const nextLeaf = () => page.evaluate(() => { const d = window.__dvor, f = d.field; for (let i = 0; i < f.count; i++) if (f.state[i] === 0) { d.aim(i, 1.2, 0.2); return i; } return -1; });
@@ -99,20 +99,21 @@ await page.keyboard.press('KeyF');
 await page.waitForFunction(() => window.__dvor.economy.inBag === 0, null, { timeout: 30000 });
 let s = await st();
 assert.equal(s.bag, 0);
-assert.equal(s.coins, afterHold.bag);
+assert.equal(s.money, afterHold.bag * 40, 'лист — $0,004 (40 единиц по $0,0001)');
+assert.match(await page.textContent('#coins-value'), /^\$\d+,\d\d$/, 'баланс показан в долларах с двумя знаками');
 
-// добираем до 10 монет и покупаем захват через блокнот
-await page.evaluate(() => window.__dvor.earn(12));
+// добираем до $0,10 и покупаем «Жадную хватку 1» через блокнот
+await page.evaluate(() => window.__dvor.earn(60));
 await page.keyboard.press('Tab');
 await page.waitForTimeout(200);
 assert.ok(await page.isVisible('#shop'), 'блокнот открыт');
-const coinsBefore = (await st()).coins;
+const moneyBefore = (await st()).money;
 const bagInShop = (await st()).bag;
 await page.click('#shop-rows .upg:nth-child(1) button');
 await page.waitForTimeout(100);
 s = await st();
 assert.equal(s.grab, 2);
-assert.equal(s.coins, coinsBefore - 10);
+assert.equal(s.money, moneyBefore - 1000, 'списано ровно $0,10');
 // клики по блокноту листья не собирают
 await page.mouse.click(30, 30);
 await page.waitForTimeout(1500);
@@ -137,7 +138,7 @@ const page2 = await ctx.newPage();
 page2.on('pageerror', (e) => errors.push(String(e)));
 await page2.goto(`${base}?debug`);
 await page2.waitForFunction(() => window.__dvor);
-const restored = await page2.evaluate(() => { const e = window.__dvor.economy; return { bag: e.inBag, coins: e.coins, sold: e.sold, grab: e.grab }; });
+const restored = await page2.evaluate(() => { const e = window.__dvor.economy; return { bag: e.inBag, money: e.money, sold: e.sold, grab: e.grab }; });
 assert.deepEqual(restored, s, 'деньги, покупки и мешок восстановлены');
 assert.equal(await page2.evaluate(() => Array.from(window.__dvor.field.state).join('')), statesBefore, 'убранные листья восстановлены');
 page = page2;
@@ -154,7 +155,7 @@ assert.equal(await page.evaluate(() => window.__marker), 'не перезагр�
 
 // пауза останавливает сбор
 await page.evaluate(() => window.__dvor.play());
-await page.evaluate(() => window.__dvor.aim(40, 1.2, 0.2));
+await page.evaluate(() => { const d = window.__dvor, f = d.field; for (let i = 0; i < f.count; i++) if (f.state[i] === 0) { d.aim(i, 1.2, 0.2); break; } });
 await page.waitForFunction(() => window.__dvor.hover() >= 0, null, { timeout: 30000 });
 await page.waitForTimeout(400); // мимо окна, когда клики после входа в игру игнорируются
 await page.mouse.down();
@@ -173,6 +174,29 @@ await page.waitForTimeout(300);
 assert.equal(await page.evaluate(() => window.__dvor.mouseState().held), false, 'потеря фокуса сбрасывает удержание');
 await page.mouse.up();
 assert.ok(await page.isVisible('#pause'));
+
+// сохранение прежней экономики (монеты): не загружается как доллары, предлагается экспорт и новый старт.
+// Записываем его со страницы без игры, чтобы игра при выгрузке не перезаписала его своим.
+await page.goto(base.replace('index.html', 'assets/yard/models-manifest.json'));
+await page.evaluate(() => {
+  const old = { version: 2, seed: 20261020, progress: { coins: 420, upgrades: { grab: 2, speed: 0, bag: 1 } },
+    zones: { yard: { state: '0'.repeat(2500), pos: new Array(7500).fill(0) } } };
+  localStorage.setItem('leaf-yard-save-v1', JSON.stringify(old));
+});
+await page.goto(`${base}?debug`);
+await page.waitForFunction(() => window.__dvor);
+assert.ok(await page.isVisible('#legacy'), 'показан выбор для прежнего сохранения');
+assert.ok(await page.isDisabled('#start-btn'), 'до выбора игра не начинается');
+assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('leaf-yard-save-v1')).version), 2, 'прежнее не перезаписано');
+const [download] = await Promise.all([page.waitForEvent('download'), page.click('#legacy-export')]);
+assert.match(download.suggestedFilename(), /old-coins-save\.json$/);
+await page.click('#legacy-new');
+await page.click('#legacy-yes');
+assert.ok(!(await page.isDisabled('#start-btn')));
+const legacyAfter = await page.evaluate(() => ({ v: JSON.parse(localStorage.getItem('leaf-yard-save-v1')).version,
+  money: JSON.parse(localStorage.getItem('leaf-yard-save-v1')).progress.money,
+  backup: JSON.parse(localStorage.getItem('leaf-yard-save-legacy-backup')).progress.coins }));
+assert.deepEqual(legacyAfter, { v: 3, money: 0, backup: 420 }, 'новая игра с $0,00, копия прежнего сохранения осталась');
 
 assert.deepEqual(errors, []);
 console.log('smoke ok', restored);

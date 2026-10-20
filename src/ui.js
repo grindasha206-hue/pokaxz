@@ -1,6 +1,6 @@
 // Интерфейс поверх сцены: HUD, подсказки, магазин-блокнот, пауза и настройки.
 
-import { UPGRADES, BRANCHES, plural } from './config.js';
+import { UPGRADES, BRANCHES, LOCKED_TOOLS, formatMoney, formatGain, plural } from './config.js';
 import { level } from './layout.js';
 import { nextLevel } from './economy.js';
 
@@ -29,11 +29,12 @@ export class UI {
     fn(value);
   }
 
-  coins(n, delta = 0) {
-    this.set('coins', n, (v) => { this.el.coinsValue.textContent = v; });
+  /** Баланс в единицах $0,0001; delta — доход или покупка, для короткой анимации. */
+  money(units, delta = 0) {
+    this.set('money', formatMoney(units), (v) => { this.el.coinsValue.textContent = v; });
     if (delta) {
       const d = this.el.coinsDelta;
-      d.textContent = delta > 0 ? `+${delta}` : `−${-delta}`;
+      d.textContent = delta > 0 ? formatGain(delta) : '−' + formatMoney(-delta);
       d.classList.toggle('minus', delta < 0);
       d.classList.remove('show'); void d.offsetWidth; d.classList.add('show');
       const c = this.el.coins;
@@ -102,16 +103,17 @@ export class UI {
 
   renderShop(economy, onBuy) {
     const p = economy.progress;
-    this.el.shopCoins.textContent = p.coins;
+    this.el.shopCoins.textContent = formatMoney(p.money);
     const rows = this.el.shopRows;
     rows.textContent = '';
     for (const b of BRANCHES) {
       const u = UPGRADES[b], next = nextLevel(p, b), lvl = p.upgrades[b];
       const row = document.createElement('div');
-      row.className = 'upg' + (next && p.coins >= next.price ? ' can' : '');
+      row.className = 'upg' + (next && p.money >= next.price ? ' can' : '');
       const name = document.createElement('div');
       name.className = 'name';
       name.innerHTML = `${u.title}<span class="levels">${'●'.repeat(lvl + 1)}${'○'.repeat(u.prices.length - lvl)}</span>`;
+      name.title = u.hint;
       const vals = document.createElement('div');
       vals.className = 'vals';
       if (next) vals.innerHTML = `<span class="now">${u.unit(next.current)}</span><span class="arrow">→</span><span class="next">${u.unit(next.value)}</span>`;
@@ -121,24 +123,31 @@ export class UI {
       const btn = document.createElement('button');
       if (!next) { btn.textContent = 'максимум'; btn.disabled = true; }
       else {
-        btn.textContent = `купить · ${next.price}`;
-        btn.disabled = p.coins < next.price;
+        btn.textContent = `купить · ${formatMoney(next.price)}`;
+        btn.disabled = p.money < next.price;
         btn.addEventListener('click', () => onBuy(b, btn));
       }
       buy.append(btn);
-      if (next && p.coins < next.price) {
+      if (next && p.money < next.price) {
         const lack = document.createElement('div');
         lack.className = 'lack';
-        lack.textContent = `не хватает ${next.price - p.coins}`;
+        // «не хватает» округляем вверх до цента, чтобы сумма действительно покрывала цену
+        lack.textContent = `не хватает ${formatMoney(Math.ceil((next.price - p.money) / 100) * 100)}`;
         buy.append(lack);
       }
       row.append(name, buy, vals);
       rows.append(row);
     }
-    const left = economy.remaining;
+    // инструменты из таблицы, которых ещё нет: цены видны, купить нельзя
+    const locked = document.getElementById('locked-tools');
+    locked.innerHTML = LOCKED_TOOLS.map((t) =>
+      `<div class="dim"><b>${t.title}</b> · ${formatMoney(t.price)} — ${t.info} <span class="tag">ещё нет в игре</span>` +
+      `<div class="sub">${t.upgrades.map((u) => `${u.title}: ${u.prices.map(formatMoney).join(' → ')} (${u.info})`).join('<br>')}</div></div>`).join('');
+    const rewards = (economy.rewards || []).map((r) =>
+      `<div class="${p.bonuses.includes(r.id) ? '' : 'dim'}">${Math.round(r.at * 100)} % — ${r.text} ${p.bonuses.includes(r.id) ? '✓' : ''}</div>`).join('');
     this.el.shopProgress.innerHTML =
       `<div>${level.name}: убрано ${economy.cleaned} из ${economy.field.count} (${Math.floor(economy.cleanedRatio * 100)} %)</div>` +
-      `<div>Сдано листьев: ${economy.sold}, в мешке: ${economy.inBag}</div>` +
-      `<div class="dim">Сад — ${left === 0 && economy.inBag === 0 ? 'скоро откроется' : 'откроется после уборки двора'}</div>`;
+      `<div>Цена листа: ${formatMoney(economy.leafValue * 1000)} за 1000 · сдано ${economy.sold}, в мешке ${economy.inBag}</div>` +
+      rewards;
   }
 }

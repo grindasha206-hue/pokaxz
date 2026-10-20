@@ -131,8 +131,14 @@ button:disabled { cursor: default; opacity: .6; }
 .upg.can .name::after { content: ' ✓'; color: var(--green); font-size: 22px; }
 .upg + .upg { margin-top: 8px; }
 .tools-list .dim { color: #8f8472; }
+.tools-list .sub { font: 13px/1.4 var(--ui); color: #9c917f; margin: 0 0 6px 8px; }
 .tag { font: 600 12px/1 var(--ui); padding: 3px 7px; border-radius: 8px; background: #eee3cc; color: #7a6a55; vertical-align: 3px; }
 .tag.ok { background: #d9ead0; color: #3f6b34; }
 #shop-progress { color: #3d3850; }
 .notebook footer { margin-top: 12px; font: 15px var(--ui); color: var(--muted); }
 .notebook footer kbd { font-size: 11px; }
+
+/* прежнее сохранение (монеты): выбор перед стартом */
+.legacy { margin: 0 0 14px; padding: 10px 12px; border-radius: 12px; background: #fff3dc; border: 1px solid #e8c98f; font-size: 14px; }
+.legacy p { margin: 0 0 8px; }
+.legacy .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }

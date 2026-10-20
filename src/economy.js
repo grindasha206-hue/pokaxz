@@ -1,14 +1,16 @@
-// Экономика: мешок, сдача, покупки. Чистый модуль без three.js.
+// Экономика: мешок, сдача за доллары, бонусы зоны, покупки. Чистый модуль без three.js.
 //
-// Источник правды — состояние листьев. Мешок — это листья в состоянии IN_BAG,
-// заработок — листья SOLD. Поэтому лист невозможно собрать или продать дважды,
-// а баланс всегда можно проверить: coins = sold * COINS_PER_LEAF − потрачено.
+// Мешок — это листья в состоянии IN_BAG, проданные — SOLD, поэтому лист невозможно
+// собрать или продать дважды. Деньги — целые единицы по $0,0001 (см. config.js):
+// лист стоит LEAF_VALUE единиц плюс LEAF_BONUS за каждый полученный бонус зоны.
+// Доход начисляется при сдаче. Баланс проверяем так: money = earned − потрачено,
+// а earned лежит между «все листья по базовой цене» и «все по цене с бонусами».
 
-import { UPGRADES, BRANCHES, COINS_PER_LEAF } from './config.js';
+import { UPGRADES, BRANCHES, LEAF_VALUE, LEAF_BONUS } from './config.js';
 import { ON_GROUND, IN_BAG, SOLD } from './leaves.js';
 
 export function newProgress() {
-  return { coins: 0, upgrades: { grab: 0, speed: 0, bag: 0 }, carry: 0 };
+  return { money: 0, earned: 0, upgrades: { grab: 0, speed: 0, bag: 0 }, bonuses: [] };
 }
 
 export function stat(progress, branch) {
@@ -18,7 +20,7 @@ export function stat(progress, branch) {
 export function nextLevel(progress, branch) {
   const u = UPGRADES[branch], lvl = progress.upgrades[branch];
   if (lvl >= u.prices.length) return null;
-  return { price: u.prices[lvl], value: u.values[lvl + 1], current: u.values[lvl] };
+  return { price: u.prices[lvl], value: u.values[lvl + 1], current: u.values[lvl], level: lvl + 1 };
 }
 
 export function spentOn(upgrades) {
@@ -30,9 +32,15 @@ export function spentOn(upgrades) {
 }
 
 export class Economy {
-  constructor(field, progress = newProgress()) {
+  /**
+   * rewards — награды зоны: [{ id, at: доля убранного, leafBonus: 1 | 0, text }].
+   * Награда выдаётся один раз и хранится в progress.bonuses.
+   */
+  constructor(field, progress = newProgress(), rewards = []) {
     this.field = field;
     this.progress = progress;
+    this.rewards = rewards;
+    this.lastGain = 0;
     this.recount();
   }
 
@@ -45,10 +53,18 @@ export class Economy {
   get grab() { return stat(this.progress, 'grab'); }
   get pickTime() { return stat(this.progress, 'speed'); }
   get free() { return Math.max(0, this.capacity - this.inBag); }
-  get coins() { return this.progress.coins; }
+  get money() { return this.progress.money; }
   get cleaned() { return this.inBag + this.sold; }
   get remaining() { return this.field.count - this.cleaned; }
   get cleanedRatio() { return this.cleaned / this.field.count; }
+
+  /** Сколько бонусов к цене листа получено (каждый +25 % базовой цены). */
+  get leafBonuses() {
+    return this.rewards.filter((r) => r.leafBonus && this.progress.bonuses.includes(r.id)).length;
+  }
+
+  /** Цена одного листа сейчас, в единицах $0,0001. */
+  get leafValue() { return LEAF_VALUE + LEAF_BONUS * this.leafBonuses; }
 
   /** Кладёт в мешок лежащие листья из списка, сколько поместится. Возвращает собранные индексы. */
   collect(ids) {
@@ -64,31 +80,52 @@ export class Economy {
     return taken;
   }
 
-  /** Сдаёт всё содержимое мешка (в том числе неполный мешок). Возвращает число листьев. */
+  /**
+   * Выдаёт награды зоны, порог которых достигнут (по доле убранных листьев, включая мешок).
+   * Каждая награда — один раз. Возвращает только что полученные.
+   */
+  checkRewards() {
+    const got = [];
+    for (const r of this.rewards) {
+      if (this.cleanedRatio >= r.at && !this.progress.bonuses.includes(r.id)) {
+        this.progress.bonuses.push(r.id);
+        got.push(r);
+      }
+    }
+    return got;
+  }
+
+  /**
+   * Сдаёт всё содержимое мешка (в том числе неполный мешок) по текущей цене листа.
+   * Возвращает число листьев; доход в единицах — в lastGain. Остаток меньше цента сохраняется.
+   */
   deposit() {
     const f = this.field;
     let n = 0;
     for (let i = 0; i < f.count; i++) {
       if (f.state[i] === IN_BAG) { f.state[i] = SOLD; n++; }
     }
+    const gain = n * this.leafValue;
     this.inBag -= n;
     this.sold += n;
-    this.progress.coins += n * COINS_PER_LEAF;
+    this.progress.money += gain;
+    this.progress.earned += gain;
+    this.lastGain = gain;
     if (n) f.version++;
     return n;
   }
 
   canBuy(branch) {
     const next = nextLevel(this.progress, branch);
-    return !!next && this.progress.coins >= next.price;
+    return !!next && this.progress.money >= next.price;
   }
 
-  /** Покупает следующий уровень ветки. Списывает точную цену, уровень растёт ровно на 1. */
+  /** Покупает следующую ступень ветки: списывает точную цену, уровень растёт ровно на 1. */
   buy(branch) {
     if (!UPGRADES[branch]) return null;
     const next = nextLevel(this.progress, branch);
-    if (!next || this.progress.coins < next.price) return null;
-    this.progress.coins -= next.price;
+    if (!next || this.progress.money < next.price) return null;
+    this.progress.money -= next.price;
     this.progress.upgrades[branch]++;
     return next;
   }
@@ -99,7 +136,8 @@ export class Economy {
    */
   validate() {
     const fixes = [];
-    const up = this.progress.upgrades;
+    const p = this.progress;
+    const up = p.upgrades;
     for (const b of BRANCHES) {
       const max = UPGRADES[b].prices.length;
       const v = Number.isInteger(up[b]) ? up[b] : 0;
@@ -107,18 +145,27 @@ export class Economy {
       up[b] = Math.min(Math.max(v, 0), max);
     }
     this.recount();
-    // carry — заработок, перенесённый из сохранения прежней раскладки двора
-    const carry = Number.isFinite(this.progress.carry) && this.progress.carry > 0 ? Math.floor(this.progress.carry) : 0;
-    this.progress.carry = carry;
-    const expected = carry + this.sold * COINS_PER_LEAF - spentOn(up);
-    if (expected < 0) {
+    // бонусы: только известные, без повторов и только если порог действительно достигнут
+    const valid = Array.isArray(p.bonuses) ? p.bonuses : [];
+    const ok = [...new Set(valid)].filter((id) => {
+      const r = this.rewards.find((x) => x.id === id);
+      return r && this.cleanedRatio >= r.at;
+    });
+    if (ok.length !== valid.length) fixes.push('bonuses');
+    p.bonuses = ok;
+    // заработок — целое число в пределах, возможных при таком числе проданных листьев
+    const lo = this.sold * LEAF_VALUE, hi = this.sold * (LEAF_VALUE + LEAF_BONUS * this.leafBonuses);
+    const earned = Number.isInteger(p.earned) ? Math.min(Math.max(p.earned, lo), hi) : lo;
+    if (earned !== p.earned) fixes.push(`earned ${p.earned} -> ${earned}`);
+    p.earned = earned;
+    if (earned - spentOn(up) < 0) {
       // покупок больше, чем заработано, — сохранение повреждено; откатываем покупки
       for (const b of BRANCHES) up[b] = 0;
       fixes.push('upgrades exceed earnings');
     }
-    const coins = carry + this.sold * COINS_PER_LEAF - spentOn(up);
-    if (this.progress.coins !== coins) fixes.push(`coins ${this.progress.coins} -> ${coins}`);
-    this.progress.coins = coins;
+    const money = earned - spentOn(up);
+    if (p.money !== money) fixes.push(`money ${p.money} -> ${money}`);
+    p.money = money;
     if (this.inBag > this.capacity) {
       // лишние листья возвращаются на землю, а не исчезают
       let extra = this.inBag - this.capacity;

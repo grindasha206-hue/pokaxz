@@ -5,7 +5,7 @@
 // подход к листу пешком, прицеливание 0,35 с, подбор по таблице скорости,
 // поход к контейнеру и обратно.
 
-import { PLAYER, UPGRADES, BRANCHES } from '../src/config.js';
+import { PLAYER, UPGRADES, BRANCHES, formatMoney } from '../src/config.js';
 import { createGame } from '../src/game.js';
 import { CONTAINER, YARD } from '../src/layout.js';
 import { ON_GROUND, mulberry32 } from '../src/leaves.js';
@@ -33,7 +33,7 @@ function simulate(strategy, seed = 1) {
       walkTo(CONTAINER.x, CONTAINER.z, 1.4);
       const n = e.deposit();
       log.trips++;
-      if (log.firstDeposit === null) log.firstDeposit = { t, coins: e.coins, leaves: n };
+      if (log.firstDeposit === null) log.firstDeposit = { t, money: e.money, leaves: n };
       for (;;) {
         const b = strategy(e, rng);
         if (!b || !e.buy(b)) break;
@@ -52,8 +52,10 @@ function simulate(strategy, seed = 1) {
     walkTo(f.x[best], f.z[best], REACH_H);
     t += AIM + e.pickTime;
     e.collect(f.gatherAround(best, Math.min(e.grab, e.free)));
+    e.checkRewards();
   }
-  return { t, coins: e.coins, spent: spentOn(e.progress.upgrades), upgrades: { ...e.progress.upgrades }, ...log };
+  const spent = spentOn(e.progress.upgrades);
+  return { t, money: e.money, earned: e.progress.earned, spent, upgrades: { ...e.progress.upgrades }, ...log };
 }
 
 const cheapest = (e) => BRANCHES.filter((b) => e.canBuy(b))
@@ -77,21 +79,25 @@ const strategies = {
   'мешок → захват → скорость': priority('bag', 'grab', 'speed'),
 };
 
-const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
-const total = BRANCHES.reduce((s, b) => s + UPGRADES[b].prices.reduce((a, c) => a + c, 0), 0);
-console.log(`Листьев на участке: ${YARD.leafCount} (= ${YARD.leafCount} монет). Вся таблица прокачки: ${total} монет.\n`);
-console.log('стратегия'.padEnd(28), 'время', ' 1-я сдача', ' 1-я покупка', ' ходок', ' потрачено', ' уровни з/с/м');
-for (const [name, s] of Object.entries(strategies)) {
-  const r = simulate(s);
+const fmt = (sec) => { const s = Math.round(sec); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+const total = BRANCHES.reduce((sum, b) => sum + UPGRADES[b].prices.reduce((x, y) => x + y, 0), 0);
+console.log(`Листьев во дворе: ${YARD.leafCount}. Лист — $0,004, после бонуса за 50 % уборки — $0,005.`);
+console.log(`Вся доступная прокачка (хватка, ловкость, мешки): ${formatMoney(total)}.\n`);
+console.log('стратегия'.padEnd(28), 'время', ' 1-я сдача', ' 1-я покупка', ' ходок', ' заработано', ' потрачено', ' уровни х/л/м');
+let minEarned = Infinity;
+for (const [name, st] of Object.entries(strategies)) {
+  const r = simulate(st);
+  minEarned = Math.min(minEarned, r.earned);
   console.log(
     name.padEnd(28), fmt(r.t).padStart(5),
-    `${r.firstDeposit.coins} мон.`.padStart(10),
+    formatMoney(r.firstDeposit.money).padStart(10),
     (r.firstBuy ? `${fmt(r.firstBuy.t)} ${r.firstBuy.branch}` : '—').padStart(12),
-    String(r.trips).padStart(6), String(r.spent).padStart(10),
+    String(r.trips).padStart(6), formatMoney(r.earned).padStart(11), formatMoney(r.spent).padStart(10),
     `  ${r.upgrades.grab}/${r.upgrades.speed}/${r.upgrades.bag}`,
   );
 }
 const times = [];
-for (let k = 0; k < 200; k++) times.push(simulate(random, k + 1).t);
+for (let k = 0; k < 60; k++) { const r = simulate(random, k + 1); times.push(r.t); minEarned = Math.min(minEarned, r.earned); }
 times.sort((a, b) => a - b);
-console.log(`\nслучайные порядки покупок (200 прогонов): время уборки ${fmt(times[0])} … ${fmt(times[times.length - 1])}, медиана ${fmt(times[100])}`);
+console.log(`\nслучайные порядки покупок (60 прогонов): время уборки ${fmt(times[0])} … ${fmt(times[times.length - 1])}, медиана ${fmt(times[30])}`);
+console.log(`минимальный заработок за двор: ${formatMoney(minEarned)} — ${minEarned >= total ? 'хватает' : 'НЕ хватает'} на всю прокачку (${formatMoney(total)}), запас ${formatMoney(minEarned - total)}`);
