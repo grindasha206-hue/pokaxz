@@ -2,25 +2,29 @@
 
 import * as THREE from '../vendor/three.module.min.js';
 import { PLAYER, UPGRADES, REMAINING_HIGHLIGHT, ZONE, plural } from './config.js';
-import { CONTAINER, SHOP, OBSTACLES, distToObstacle, resolveCircle, segmentBlocked, surfaceHeight } from './layout.js';
+import { level, setLevel, distToObstacle, resolveCircle, segmentBlocked, surfaceHeight } from './layout.js';
 import { ON_GROUND } from './leaves.js';
 import { createGame } from './game.js';
 import { buildSave, parseSave, readLocal, writeLocal, clearLocal } from './save.js';
 import { buildWorld } from './view/scene.js';
 import { Ground } from './view/ground.js';
-import { LeafView } from './view/leafView.js';
-import { Hand } from './view/hand.js';
+import { LeafView, loadLeafTextures } from './view/leafView.js';
+import { buildFragment } from './view/fragment.js';
 import { UI } from './ui.js';
 import { Sound } from './audio.js';
 
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has('debug');
 const LEAF_OVERRIDE = params.has('leaves') ? Math.max(1, parseInt(params.get('leaves'), 10) || 600) : null;
-// режим замера и чистого старта не трогает настоящее сохранение
-const NO_SAVE = params.has('fresh') || LEAF_OVERRIDE !== null;
+// ?fragment — небольшой участок для проверки ковра из листьев и подбора
+const FRAGMENT_MODE = params.has('fragment');
+if (FRAGMENT_MODE) setLevel('fragment');
+// режим замера, фрагмент и чистый старт не трогают настоящее сохранение
+const NO_SAVE = params.has('fresh') || LEAF_OVERRIDE !== null || FRAGMENT_MODE;
 const FORCE_FPS = params.has('fps') || LEAF_OVERRIDE !== null;
 
 const ui = new UI();
+document.getElementById('zone-name').textContent = level.name;
 const sound = new Sound();
 
 // ── загрузка ─────────────────────────────────────────────────
@@ -36,7 +40,10 @@ let game, startNote = '';
     game = createGame(null);
     startNote = 'Сохранение не удалось прочитать — начата новая игра.';
   }
-  if (NO_SAVE) startNote = LEAF_OVERRIDE ? `Замер: ${LEAF_OVERRIDE} листьев, прогресс не сохраняется.` : 'Чистый старт, прогресс не сохраняется.';
+  if (NO_SAVE) {
+    startNote = FRAGMENT_MODE ? `Фрагмент для оценки листьев: ${game.field.count} листьев, прогресс не сохраняется.`
+      : LEAF_OVERRIDE ? `Замер: ${LEAF_OVERRIDE} листьев, прогресс не сохраняется.` : 'Чистый старт, прогресс не сохраняется.';
+  }
 }
 const { field, economy, settings } = game;
 
@@ -44,6 +51,7 @@ const { field, economy, settings } = game;
 try {
   await Promise.race([document.fonts.load('700 40px Caveat'), new Promise((r) => setTimeout(r, 1500))]);
 } catch { /* без шрифта таблички нарисуются запасным */ }
+const leafTextures = await loadLeafTextures();
 
 // ── рендер ───────────────────────────────────────────────────
 const canvas = document.getElementById('view');
@@ -58,11 +66,16 @@ renderer.autoClear = false;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 600);
 camera.rotation.order = 'YXZ';
-const world = buildWorld(scene);
-const ground = new Ground(field);
-scene.add(ground.mesh);
-const leaves = new LeafView(scene, field);
-const hand = new Hand(camera.fov);
+let world, ground;
+if (FRAGMENT_MODE) {
+  world = buildFragment(scene);
+  ground = world;
+} else {
+  world = buildWorld(scene);
+  ground = new Ground(field);
+  scene.add(ground.mesh);
+}
+const leaves = new LeafView(scene, field, leafTextures, { size: level.leafSize });
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -70,7 +83,6 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  hand.setAspect(w / h);
 }
 window.addEventListener('resize', resize);
 resize();
@@ -254,10 +266,11 @@ function nearest() {
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   let best = null, bestD = Infinity;
   for (const id of ['container', 'shop']) {
-    const o = OBSTACLES.find((ob) => ob.id === id);
+    const o = level.obstacles.find((ob) => ob.id === id);
+    if (!o) continue;
     const d = distToObstacle(player.x, player.z, o);
     if (d > PLAYER.interactReach - PLAYER.radius) continue;
-    const c = id === 'container' ? CONTAINER : SHOP;
+    const c = id === 'container' ? level.container : level.shop;
     const dx = c.x - player.x, dz = c.z - player.z, len = Math.hypot(dx, dz) || 1;
     if ((dx * fx + dz * fz) / len < 0.2 && d > 0.6) continue;
     if (d < bestD) { bestD = d; best = id; }
@@ -271,7 +284,7 @@ function interact() {
   else if (target === 'shop') openShop();
 }
 
-const tmpV = new THREE.Vector3(), handWorld = new THREE.Vector3();
+const tmpV = new THREE.Vector3(), tmpFrom = new THREE.Vector3();
 
 function deposit() {
   if (economy.inBag === 0) {
@@ -282,8 +295,9 @@ function deposit() {
   sound.deposit(n);
   ui.coins(economy.coins, n);
   ui.bag(economy.inBag, economy.capacity, true);
-  hand.worldPoint(camera, handWorld);
-  leaves.depositBurst(handWorld, tmpV.set(CONTAINER.x, CONTAINER.h + 0.1, CONTAINER.z), n, now);
+  const C = level.container;
+  camera.localToWorld(tmpFrom.set(0.12, -0.3, -0.45));
+  leaves.depositBurst(tmpFrom, tmpV.set(C.x, C.h + 0.1, C.z), n, now);
   lidOpenUntil = now + 0.9;
   if (!game.hints.deposited) game.hints.deposited = true;
   ui.toast(`Сдано ${n} ${plural(n, 'лист', 'листа', 'листьев')}: <b>+${n}</b> ${plural(n, 'монета', 'монеты', 'монет')}`, 2000);
@@ -320,23 +334,24 @@ function renderShop() { ui.renderShop(economy, buy); }
 const camDir = new THREE.Vector3();
 
 function findHover() {
+  // Выбираем самый верхний видимый лист: точку, где луч взгляда пересекает плоскость листа,
+  // сравниваем с его радиусом. В плотном ковре так берётся тот лист, что лежит сверху.
   camera.getWorldDirection(camDir);
   const ox = camera.position.x, oy = camera.position.y, oz = camera.position.z;
+  if (camDir.y > -0.05) return -1;
   const reach2 = PLAYER.reach * PLAYER.reach;
   const cand = [];
   for (let i = 0; i < field.count; i++) {
     if (field.state[i] !== ON_GROUND) continue;
-    const vx = field.x[i] - ox, vz = field.z[i] - oz;
-    if (vx * vx + vz * vz > reach2) continue;
-    const vy = field.y(i) - oy;
-    const d2 = vx * vx + vy * vy + vz * vz;
-    if (d2 > reach2) continue;
-    const t = vx * camDir.x + vy * camDir.y + vz * camDir.z;
-    if (t < 0.2) continue;
-    const perp2 = Math.max(0, d2 - t * t);
-    const tol = 0.07 + field.scale[i] * 0.09 + t * 0.012;
-    if (perp2 > tol * tol) continue;
-    cand.push([perp2 / (tol * tol) + t * 0.04, i]);
+    const ly = field.y(i);
+    const t = (ly - oy) / camDir.y;
+    if (t <= 0 || t * t > reach2) continue;
+    const hx = ox + camDir.x * t - field.x[i], hz = oz + camDir.z * t - field.z[i];
+    const R = leaves.pickRadius(i) + 0.012 + t * 0.006;
+    const d2 = hx * hx + hz * hz;
+    if (d2 > R * R) continue;
+    // выше лежащий лист важнее; среди близких по высоте — тот, что ближе к центру прицела
+    cand.push([-ly * 40 + Math.sqrt(d2) / R, i]);
   }
   cand.sort((a, b) => a[0] - b[0]);
   for (let k = 0; k < Math.min(cand.length, 6); k++) {
@@ -389,9 +404,7 @@ function updatePicking(dt) {
       const ids = field.gatherAround(pick.target, Math.min(economy.grab, economy.free));
       const got = economy.collect(ids);
       if (got.length) {
-        hand.worldPoint(camera, handWorld);
-        leaves.flyToHand(got, now);
-        hand.grabbed();
+        leaves.flyToCamera(got, now);
         sound.rustle(got.length);
         ui.bag(economy.inBag, economy.capacity, true);
         game.hints.picked = true;
@@ -458,12 +471,13 @@ function updateHints() {
 
   // указатель на контейнер, когда мешок полон
   const full = economy.free === 0;
-  const dCont = Math.hypot(CONTAINER.x - player.x, CONTAINER.z - player.z);
+  const C = level.container;
+  const dCont = Math.hypot(C.x - player.x, C.z - player.z);
   world.container.arrow.visible = full;
   if (full && dCont > 2.4) {
     const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
     const rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
-    const dx = CONTAINER.x - player.x, dz = CONTAINER.z - player.z;
+    const dx = C.x - player.x, dz = C.z - player.z;
     ui.pointer(Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz));
   } else ui.pointer(null);
 }
@@ -556,16 +570,14 @@ let lidOpenUntil = 0, lidAngle = 0;
 let remainingIds = null, remainingVersion = -1;
 let fpsFrames = 0, fpsTime = 0;
 let last = performance.now();
+let timeScale = 1; // только для отладочной съёмки
 
 function frame(t) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (t - last) / 1000);
   last = t;
-  now += dt;
-  let walkSpeed = 0;
-  if (state === 'playing') {
-    walkSpeed = updateMovement(dt);
-  }
+  now += dt * timeScale;
+  if (state === 'playing') updateMovement(dt);
   camera.position.set(player.x, player.eye, player.z);
   camera.rotation.set(player.pitch, player.yaw, 0);
   camera.updateMatrixWorld();
@@ -575,6 +587,7 @@ function frame(t) {
   } else {
     hoverId = -1; hoverGroup = [];
   }
+  leaves.setWobble(pick ? pick.target : -1, pick ? Math.min(1, pick.elapsed / pick.duration) : 0, now);
   leaves.setHighlight(pick ? pick.target : hoverId, pick ? groupFor(pick.target) : hoverGroup);
   updateHints();
   ui.crosshair(hoverId >= 0 || !!pick, pick ? Math.min(1, pick.elapsed / pick.duration) : null);
@@ -591,21 +604,18 @@ function frame(t) {
     }
   }
 
-  hand.update(dt, { picking: !!pick, progress: pick ? pick.elapsed / pick.duration : 0, walkSpeed });
-  hand.worldPoint(camera, handWorld);
-  leaves.update(now, dt, handWorld, settings.highlightLast ? remainingIds : null);
+  leaves.update(now, dt, camera, settings.highlightLast ? remainingIds : null);
   ground.update(now);
 
   // крышка контейнера и указатель
   const lidTarget = now < lidOpenUntil ? 1.05 : 0;
   lidAngle += (lidTarget - lidAngle) * Math.min(1, dt * 10);
   world.container.lid.rotation.x = -lidAngle;
-  world.container.arrow.position.y = CONTAINER.h + 0.75 + Math.sin(now * 3) * 0.08;
+  world.container.arrow.position.y = level.container.h + 0.75 + Math.sin(now * 3) * 0.08;
   world.container.arrow.rotation.y = now * 1.5;
 
   renderer.clear();
   renderer.render(scene, camera);
-  hand.render(renderer);
 
   fpsFrames++; fpsTime += dt;
   if (fpsTime >= 0.5) {
@@ -646,6 +656,7 @@ if (DEBUG) {
     startPick() { if (hoverId >= 0) pick = { target: hoverId, elapsed: 0, duration: economy.pickTime }; },
     setPickProgress(p) { if (pick) pick.elapsed = p * pick.duration; },
     hideHud(v) { ui.show('hud', !v); },
+    slowmo(k) { timeScale = k; },
     tip(t) { ui.tip(t); },
   };
 }

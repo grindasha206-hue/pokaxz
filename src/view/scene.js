@@ -73,7 +73,7 @@ export function buildWorld(scene) {
   return refs;
 }
 
-function skyDome() {
+export function skyDome() {
   const geo = new THREE.SphereGeometry(400, 32, 16);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
@@ -252,7 +252,7 @@ export function buildTree(scene, x, z, size, colors, seed) {
 }
 
 /** Мягкий, слегка бугристый шар для крон. */
-function softBlob(r, rng) {
+export function softBlob(r, rng) {
   const geo = new THREE.SphereGeometry(r, 28, 18);
   const p = geo.attributes.position, v = new THREE.Vector3();
   const a = rng() * 10, b = rng() * 10;
@@ -359,16 +359,16 @@ function pumpkin(scene, x, z, r) {
 }
 
 // ── контейнер для листьев ─────────────────────────────────────
-function buildContainer(scene, MAT) {
+export function buildContainer(scene, MAT = { metal: lambert('#4a4d50') }, C = CONTAINER) {
   const g = new THREE.Group();
-  const { w, d, h } = CONTAINER;
+  const { w, d, h } = C;
   const green = lambert('#4f7b4c');
   const body = new THREE.CylinderGeometry(Math.SQRT1_2, Math.SQRT1_2 * 0.88, 1, 4, 1);
   body.rotateY(Math.PI / 4);
   const bm = add(g, body, green, 0, (h - 0.08) / 2 + 0.05, 0);
   bm.scale.set(w, h - 0.08, d);
   boxAt(g, lambert('#3d6340'), -w / 2 - 0.03, w / 2 + 0.03, h - 0.1, h - 0.03, -d / 2 - 0.03, d / 2 + 0.03);
-  // крышка на шарнире у задней кромки (+Z — дальняя от старта сторона? нет: старт на юге, задняя — север)
+  // крышка на шарнире у задней (северной) кромки
   const lid = new THREE.Group();
   lid.position.set(0, h - 0.03, -d / 2 - 0.03);
   boxAt(lid, lambert('#3f6a42'), -w / 2 - 0.04, w / 2 + 0.04, 0, 0.06, 0, d + 0.06);
@@ -385,14 +385,14 @@ function buildContainer(scene, MAT) {
     const wh = add(g, new THREE.CylinderGeometry(0.09, 0.09, 0.06, 12), lambert('#2b2b2b'), s * (w / 2 - 0.12), 0.09, -d / 2 + 0.05);
     wh.rotation.z = Math.PI / 2;
   }
-  // листья, выглядывающие сверху, — растут по мере сдачи (см. main)
-  g.position.set(CONTAINER.x, 0, CONTAINER.z);
+  g.position.set(C.x, 0, C.z);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   scene.add(g);
   // указатель над контейнером (показывается, когда мешок полон)
   const arrow = new THREE.Group();
   const cone = add(arrow, new THREE.ConeGeometry(0.16, 0.3, 4), lambert('#ffd36b', { emissive: '#ffb02e', emissiveIntensity: 0.5 }), 0, 0, 0, { cast: false });
   cone.rotation.x = Math.PI;
-  arrow.position.set(CONTAINER.x, h + 0.75, CONTAINER.z);
+  arrow.position.set(C.x, h + 0.75, C.z);
   arrow.visible = false;
   scene.add(arrow);
   return { group: g, lid, arrow };

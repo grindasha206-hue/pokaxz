@@ -1,10 +1,9 @@
 // Состояние игры без отрисовки: создание с нуля и из сохранения.
 
-import { ZONE } from './config.js';
 import { generateLeaves } from './leaves.js';
 import { Economy, newProgress } from './economy.js';
 import { DEFAULT_SETTINGS } from './save.js';
-import { SPAWN } from './layout.js';
+import { level } from './layout.js';
 
 export const DEFAULT_SEED = 20261020;
 
@@ -14,12 +13,12 @@ export function newHints() {
 
 export function createGame(save = null, opts = {}) {
   const seed = save ? save.seed : (opts.seed ?? DEFAULT_SEED);
-  const count = opts.leafCount ?? ZONE.leafCount;
+  const count = opts.leafCount ?? level.leafCount;
   const field = generateLeaves(seed, count);
   let progress = newProgress();
   let fixes = [];
   if (save) {
-    if (!field.restore(save.zones[ZONE.id])) throw new Error('Состояние двора в сохранении повреждено');
+    if (!field.restore(save.zones[level.id])) throw new Error('Состояние двора в сохранении повреждено');
     progress = {
       coins: Number(save.progress.coins) || 0,
       upgrades: { ...newProgress().upgrades, ...save.progress.upgrades },
@@ -32,9 +31,9 @@ export function createGame(save = null, opts = {}) {
     field,
     economy,
     fixes,
-    openZones: save?.openZones ?? [ZONE.id],
+    openZones: save?.openZones ?? [level.id],
     hints: { ...newHints(), ...(save?.hints ?? {}) },
     settings: { ...DEFAULT_SETTINGS, ...(save?.settings ?? {}) },
-    player: save?.player ?? { ...SPAWN },
+    player: save?.player ?? { ...level.spawn },
   };
 }

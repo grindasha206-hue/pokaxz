@@ -52,15 +52,135 @@ export const OBSTACLES = [
   circle('post-2', 2.25, -7.42, 0.09, 2.6),
 ];
 
-/** Высота поверхности (земля, крыльцо, ступенька) в точке. */
-export function surfaceHeight(x, z) {
+// ── уровни ──────────────────────────────────────────────────
+// Уровень описывает границы, препятствия, поверхности и раскладку листьев.
+// Все функции ниже работают с текущим уровнем (setLevel).
+
+function yardSurface(x, z) {
   if (inRect(x, z, PORCH)) return PORCH.h;
   if (inRect(x, z, PORCH_STEP)) return PORCH_STEP.h;
   return 0;
 }
 
+function yardDensity(x, z, noise, drift) {
+  const toFence = Math.min(x - ZONE.minX, ZONE.maxX - x, ZONE.maxZ - z, z - ZONE.minZ);
+  let d = 0.06;
+  d += 2.4 * Math.max(0, 1 - toFence / 1.5) ** 1.5;                 // вдоль забора и дома
+  const toTree = Math.hypot(x - TREE.x, z - TREE.z);
+  d += 3.2 * Math.max(0, 1 - toTree / 4.6) ** 1.2;                   // под деревом
+  for (const [cx, cz, r] of drift) d += 2.6 * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) / (r * r));
+  const n = noise(x * 0.38, z * 0.38);
+  d *= Math.max(0, n - 0.22) * 2.6;                                  // пятна и чистые промежутки
+  if (onPath(x, z)) d *= 0.22;                                       // на дорожке — редкие листья
+  if (yardSurface(x, z) > 0.15) d *= 0.7;                            // крыльцо
+  const toContainer = Math.hypot(x - CONTAINER.x, z - CONTAINER.z);
+  if (toContainer < 1.2) d *= 0.4;
+  return d;
+}
+
+export const YARD = {
+  id: 'yard',
+  name: 'Двор',
+  leafCount: ZONE.leafCount,
+  zone: ZONE,
+  inset: T,
+  obstacles: OBSTACLES,
+  spawn: SPAWN,
+  container: CONTAINER,
+  shop: SHOP,
+  surface: yardSurface,
+  onPath: (x, z) => inRect(x, z, PATH) || inRect(x, z, PORCH_STEP),
+  density: yardDensity,
+  maxDensity: 4.2,
+  drifts: 7,
+  starter: { x: 0.9, z: 3.3, r: 1.1, count: 28 },
+  leafMargin: 0.14,
+  leafSize: 1.9,       // множитель размера листа (у двора пока крупные листья)
+  carpet: false,
+};
+
+// ── фрагмент земли: проверка ковра из листьев и подбора ─────
+const FZ = { id: 'fragment', name: 'Фрагмент', leafCount: 11000, minX: -3, maxX: 3, minZ: -3, maxZ: 3 };
+
+// плиты дорожки: центр, радиус, поворот — дуга с юго-запада на северо-восток
+export const FRAGMENT_STONES = (() => {
+  const out = [];
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let k = 0; k < 11; k++) {
+    const t = k / 10;
+    const x = -3.2 + t * 6.4, z = 2.0 - t * 4.2 + Math.sin(t * Math.PI) * 1.0;
+    for (const off of [-0.32, 0.3]) {
+      const nx = 0.55, nz = 0.83;
+      out.push({ x: x + nx * off + (rnd() - 0.5) * 0.1, z: z + nz * off + (rnd() - 0.5) * 0.1, r: 0.2 + rnd() * 0.08, a: rnd() * 6.28, seed: k * 2 + (off > 0 ? 1 : 0) });
+    }
+  }
+  return out;
+})();
+
+export const FRAGMENT_WALL = { x0: FZ.minX - 0.3, x1: FZ.maxX + 0.3, z0: FZ.minZ - 0.35, z1: FZ.minZ, h: 0.55 };
+export const FRAGMENT_FENCE = { x0: FZ.maxX, x1: FZ.maxX + 0.1, z0: FZ.minZ, z1: FZ.maxZ, h: 1.15 };
+const FRAGMENT_CONTAINER = { x: 2.15, z: 2.35, w: 1.3, d: 1.0, h: 1.05 };
+
+const FRAGMENT_OBSTACLES = [
+  box('wall', FRAGMENT_WALL.x0, FRAGMENT_WALL.x1, FRAGMENT_WALL.z0, FRAGMENT_WALL.z1, FRAGMENT_WALL.h),
+  box('fence-e', FRAGMENT_FENCE.x0, FRAGMENT_FENCE.x1, FRAGMENT_FENCE.z0, FRAGMENT_FENCE.z1, FRAGMENT_FENCE.h),
+  box('container', FRAGMENT_CONTAINER.x - 0.65, FRAGMENT_CONTAINER.x + 0.65, FRAGMENT_CONTAINER.z - 0.5, FRAGMENT_CONTAINER.z + 0.5, 1.05),
+];
+
+export const STONE_TOP = 0.014; // плиты чуть выше газона
+
+function onStone(x, z) {
+  for (const s of FRAGMENT_STONES) if ((x - s.x) ** 2 + (z - s.z) ** 2 < s.r * s.r) return true;
+  return false;
+}
+
+function fragmentDensity(x, z, noise, drift) {
+  let d = 1.6;
+  const toWall = z - FZ.minZ, toFence = FZ.maxX - x;
+  d += 2.2 * Math.max(0, 1 - toWall / 1.4) ** 1.4;                   // нанос у каменной стенки
+  d += 1.6 * Math.max(0, 1 - toFence / 1.1) ** 1.4;                  // и у забора
+  for (const [cx, cz, r] of drift) d += 1.4 * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) / (r * r));
+  const n = noise(x * 0.55, z * 0.55);
+  d *= 0.25 + 1.5 * Math.max(0, n - 0.12);                           // проплешины травы
+  if (onStone(x, z)) d *= 0.35;                                      // на плитах реже
+  if (Math.hypot(x - FRAGMENT_CONTAINER.x, z - FRAGMENT_CONTAINER.z) < 1.0) d *= 0.5;
+  return d;
+}
+
+export const FRAGMENT = {
+  id: FZ.id,
+  name: FZ.name,
+  leafCount: FZ.leafCount,
+  zone: FZ,
+  inset: 0,
+  obstacles: FRAGMENT_OBSTACLES,
+  spawn: { x: -2.2, z: 2.4, yaw: -0.7 },
+  container: FRAGMENT_CONTAINER,
+  shop: null,
+  surface: (x, z) => (onStone(x, z) ? STONE_TOP : 0),
+  onPath: onStone,
+  density: fragmentDensity,
+  maxDensity: 4.4,
+  drifts: 5,
+  starter: null,
+  leafMargin: 0.06,
+  leafSize: 1,
+  carpet: true,
+};
+
+export const LEVELS = { yard: YARD, fragment: FRAGMENT };
+
+export let level = YARD;
+export function setLevel(l) { level = typeof l === 'string' ? LEVELS[l] : l; }
+
+/** Высота поверхности (земля, крыльцо, ступенька) в точке. */
+export function surfaceHeight(x, z) {
+  return level.surface(x, z);
+}
+
 export function onPath(x, z) {
-  return inRect(x, z, PATH) || inRect(x, z, PORCH_STEP);
+  return level.onPath(x, z);
 }
 
 function inRect(x, z, r) {
@@ -77,9 +197,10 @@ export function distToObstacle(x, z, o) {
 
 /** Свободна ли точка с отступом margin от всех препятствий и границ участка. */
 export function isFree(x, z, margin) {
-  if (x < ZONE.minX + T + margin || x > ZONE.maxX - T - margin) return false;
-  if (z < ZONE.minZ + T + margin || z > ZONE.maxZ - T - margin) return false;
-  for (const o of OBSTACLES) if (distToObstacle(x, z, o) < margin) return false;
+  const Z = level.zone, t = level.inset;
+  if (x < Z.minX + t + margin || x > Z.maxX - t - margin) return false;
+  if (z < Z.minZ + t + margin || z > Z.maxZ - t - margin) return false;
+  for (const o of level.obstacles) if (distToObstacle(x, z, o) < margin) return false;
   return true;
 }
 
@@ -88,8 +209,9 @@ export function isFree(x, z, margin) {
  * Возвращает новую позицию {x, z}.
  */
 export function resolveCircle(x, z, r) {
+  const Z = level.zone, t = level.inset;
   for (let iter = 0; iter < 3; iter++) {
-    for (const o of OBSTACLES) {
+    for (const o of level.obstacles) {
       if (o.kind === 'circle') {
         const dx = x - o.x, dz = z - o.z;
         const d = Math.hypot(dx, dz), min = o.r + r;
@@ -116,8 +238,8 @@ export function resolveCircle(x, z, r) {
       }
     }
     // границы с учётом толщины забора, чтобы зажим не возвращал круг в забор
-    x = Math.min(Math.max(x, ZONE.minX + T + r), ZONE.maxX - T - r);
-    z = Math.min(Math.max(z, ZONE.minZ + T + r), ZONE.maxZ - T - r);
+    x = Math.min(Math.max(x, Z.minX + t + r), Z.maxX - t - r);
+    z = Math.min(Math.max(z, Z.minZ + t + r), Z.maxZ - t - r);
   }
   if (isFree(x, z, r - 1e-6)) return { x, z };
   // зажато между препятствиями — ищем ближайшее свободное место по спирали
@@ -138,7 +260,7 @@ export function findFree(x, z, r) {
 
 /** Пересекает ли отрезок a→b (3D) какое-либо препятствие. */
 export function segmentBlocked(ax, ay, az, bx, by, bz, ignore = null) {
-  for (const o of OBSTACLES) {
+  for (const o of level.obstacles) {
     if (o === ignore) continue;
     if (o.kind === 'box') {
       if (segBox(ax, ay, az, bx, by, bz, o)) return true;

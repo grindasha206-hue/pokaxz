@@ -1,6 +1,7 @@
 // Сохранение: сериализация, localStorage, экспорт и восстановление.
 
-import { SAVE_KEY, SAVE_VERSION, ZONE } from './config.js';
+import { SAVE_KEY, SAVE_VERSION } from './config.js';
+import { level } from './layout.js';
 
 export const DEFAULT_SETTINGS = {
   sensitivity: 1,       // множитель чувствительности обзора
@@ -20,7 +21,7 @@ export function buildSave(game) {
     savedAt: new Date().toISOString(),
     seed: game.seed,
     progress: game.economy.progress,
-    zones: { [ZONE.id]: game.field.serialize() },
+    zones: { [level.id]: game.field.serialize() },
     openZones: game.openZones,
     hints: game.hints,
     settings: game.settings,
@@ -38,7 +39,7 @@ export function parseSave(text) {
   if (data.version !== SAVE_VERSION) throw new Error(`Неизвестная версия сохранения: ${data.version}`);
   if (!Number.isInteger(data.seed)) throw new Error('В сохранении нет зерна участка');
   if (!data.progress || !data.progress.upgrades) throw new Error('В сохранении нет покупок');
-  if (!data.zones || !data.zones[ZONE.id]) throw new Error('В сохранении нет состояния двора');
+  if (!data.zones || !data.zones[level.id]) throw new Error('В сохранении нет состояния двора');
   return data;
 }
 

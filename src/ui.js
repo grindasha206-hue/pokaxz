@@ -1,6 +1,7 @@
 // Интерфейс поверх сцены: HUD, подсказки, магазин-блокнот, пауза и настройки.
 
-import { UPGRADES, BRANCHES, ZONE, plural } from './config.js';
+import { UPGRADES, BRANCHES, plural } from './config.js';
+import { level } from './layout.js';
 import { nextLevel } from './economy.js';
 
 const $ = (id) => document.getElementById(id);
@@ -141,7 +142,7 @@ export class UI {
     }
     const left = economy.remaining;
     this.el.shopProgress.innerHTML =
-      `<div>${ZONE.name}: убрано ${economy.cleaned} из ${economy.field.count} (${Math.floor(economy.cleanedRatio * 100)} %)</div>` +
+      `<div>${level.name}: убрано ${economy.cleaned} из ${economy.field.count} (${Math.floor(economy.cleanedRatio * 100)} %)</div>` +
       `<div>Сдано листьев: ${economy.sold}, в мешке: ${economy.inBag}</div>` +
       `<div class="dim">Сад — ${left === 0 && economy.inBag === 0 ? 'скоро откроется' : 'откроется после уборки двора'}</div>`;
   }

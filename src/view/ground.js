@@ -1,11 +1,10 @@
-// Земля участка: трава, дорожка и детали, а поверх — «подстилка» из-под лежащих листьев.
-// Под убранными листьями газон становится свежим, поэтому чистая часть двора
-// заметно отличается от неубранной.
+// Земля участка: трава, дорожка и детали (клевер, цветы, камни) — открываются после уборки.
+// Круглых теней под листьями нет: глубину слоя даёт затенение нижних листьев.
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { ZONE } from '../config.js';
 import { PATH, OBSTACLES } from '../layout.js';
-import { ON_GROUND, mulberry32 } from '../leaves.js';
+import { mulberry32 } from '../leaves.js';
 import { canvas, paintGrass, toTexture, shade } from './textures.js';
 
 const PX = 1024;
@@ -19,12 +18,6 @@ export class Ground {
     this.field = field;
     this.base = canvas(PX);
     this.paintBase(this.base.getContext('2d'));
-    this.blob = canvas(64);
-    const b = this.blob.getContext('2d');
-    const g = b.createRadialGradient(32, 32, 0, 32, 32, 32);
-    g.addColorStop(0, 'rgba(214,190,128,0.55)');
-    g.addColorStop(1, 'rgba(214,190,128,0)');
-    b.fillStyle = g; b.fillRect(0, 0, 64, 64);
     this.canvas = canvas(PX);
     this.ctx = this.canvas.getContext('2d');
     this.texture = toTexture(this.canvas);
@@ -34,8 +27,6 @@ export class Ground {
     this.mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: this.texture }));
     this.mesh.position.set((ZONE.minX + ZONE.maxX) / 2, 0, (ZONE.minZ + ZONE.maxZ) / 2);
     this.mesh.receiveShadow = true;
-    this.lastVersion = -1;
-    this.lastPaint = -Infinity;
     this.redraw();
   }
 
@@ -94,34 +85,12 @@ export class Ground {
     }
   }
 
-  /** Перерисовывает подстилку, если листья изменились (не чаще, чем раз в 0,25 с). */
-  update(now) {
-    if (this.field.version === this.lastVersion) return;
-    if (now - this.lastPaint < 0.25) return;
-    this.redraw();
-    this.lastPaint = now;
-  }
+  update() { /* земля статична */ }
 
   redraw() {
-    const ctx = this.ctx, f = this.field;
+    const ctx = this.ctx;
     ctx.globalCompositeOperation = 'source-over';
     ctx.drawImage(this.base, 0, 0);
-    // увядшая, примятая трава под лежащими листьями: мягкие пятна, сливающиеся в скоплениях
-    ctx.globalCompositeOperation = 'multiply';
-    for (let i = 0; i < f.count; i++) {
-      if (f.state[i] !== ON_GROUND) continue;
-      const r = (0.26 + f.scale[i] * 0.1) * m;
-      ctx.drawImage(this.blob, sx(f.x[i]) - r, sz(f.z[i]) - r, r * 2, r * 2);
-    }
-    ctx.globalCompositeOperation = 'source-over';
-    // мелкий сор: обрывки листьев и веточки
-    for (let i = 0; i < f.count; i++) {
-      if (f.state[i] !== ON_GROUND) continue;
-      ctx.fillStyle = i % 3 ? 'rgba(160,110,50,0.35)' : 'rgba(120,85,45,0.35)';
-      const x = sx(f.x[i]) + Math.sin(i * 12.9) * 0.18 * m, y = sz(f.z[i]) + Math.cos(i * 7.3) * 0.18 * m;
-      ctx.fillRect(x, y, 2.5, 1.5);
-    }
     this.texture.needsUpdate = true;
-    this.lastVersion = f.version;
   }
 }

@@ -1,17 +1,17 @@
 // Поле листьев: генерация, состояния, поиск соседей, сдвиг.
 // Чистый модуль без three.js.
 
-import { ZONE, GRAB_RADIUS } from './config.js';
-import { CONTAINER, TREE, isFree, onPath, resolveCircle, segmentBlocked, surfaceHeight } from './layout.js';
+import { GRAB_RADIUS } from './config.js';
+import { level, isFree, resolveCircle, segmentBlocked, surfaceHeight } from './layout.js';
 
 export const ON_GROUND = 0;
 export const IN_BAG = 1;
 export const SOLD = 2;
 
-export const SHAPES = 3;        // клён, берёза, дуб
-export const PALETTE_SIZE = 7;  // см. view: золотой, охра, оранжевый, ...
+export const SHAPES = 6;        // виды листьев — клетки атласа текстур
+export const PALETTE_SIZE = 4;  // лёгкие сдвиги оттенка
 
-// Минимальный отступ листа от препятствий и забора.
+// Минимальный отступ листа от препятствий и забора (для двора; у уровня свой).
 export const LEAF_MARGIN = 0.14;
 
 export function mulberry32(seed) {
@@ -40,32 +40,13 @@ function valueNoise(seed) {
   };
 }
 
-// Первые листья — между стартом и контейнером.
-export const STARTER_CLUSTER = { x: 0.9, z: 3.3, r: 1.1, count: 28 };
-
 // Центры «наносов» — плотных скоплений, которые намёл ветер.
-function drifts(rng) {
-  const out = [];
-  for (let k = 0; k < 7; k++) {
-    out.push([ZONE.minX + 1 + rng() * (ZONE.maxX - ZONE.minX - 2), ZONE.minZ + 1.5 + rng() * (ZONE.maxZ - ZONE.minZ - 3), 0.8 + rng() * 0.9]);
+function drifts(rng, n) {
+  const Z = level.zone, out = [];
+  for (let k = 0; k < n; k++) {
+    out.push([Z.minX + 1 + rng() * (Z.maxX - Z.minX - 2), Z.minZ + 1 + rng() * (Z.maxZ - Z.minZ - 2), 0.8 + rng() * 0.9]);
   }
   return out;
-}
-
-function density(x, z, noise, drift) {
-  const toFence = Math.min(x - ZONE.minX, ZONE.maxX - x, ZONE.maxZ - z, z - ZONE.minZ);
-  let d = 0.06;
-  d += 2.4 * Math.max(0, 1 - toFence / 1.5) ** 1.5;                 // вдоль забора и дома
-  const toTree = Math.hypot(x - TREE.x, z - TREE.z);
-  d += 3.2 * Math.max(0, 1 - toTree / 4.6) ** 1.2;                   // под деревом
-  for (const [cx, cz, r] of drift) d += 2.6 * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) / (r * r));
-  const n = noise(x * 0.38, z * 0.38);
-  d *= Math.max(0, n - 0.22) * 2.6;                                  // пятна и чистые промежутки
-  if (onPath(x, z)) d *= 0.22;                                       // на дорожке — редкие листья
-  if (surfaceHeight(x, z) > 0.15) d *= 0.7;                          // крыльцо
-  const toContainer = Math.hypot(x - CONTAINER.x, z - CONTAINER.z);
-  if (toContainer < 1.2) d *= 0.4;
-  return d;
 }
 
 export class LeafField {
@@ -123,7 +104,7 @@ export class LeafField {
   /** Сдвигает лежащий лист; лист никогда не попадает в препятствие или за забор. */
   nudge(i, dx, dz) {
     if (this.state[i] !== ON_GROUND) return;
-    const p = resolveCircle(this.x[i] + dx, this.z[i] + dz, LEAF_MARGIN);
+    const p = resolveCircle(this.x[i] + dx, this.z[i] + dz, level.leafMargin);
     this.x[i] = p.x; this.z[i] = p.z;
     this.version++;
   }
@@ -149,7 +130,7 @@ export class LeafField {
     for (let i = 0; i < this.count; i++) {
       this.state[i] = data.state.charCodeAt(i) - 48;
       // даже испорченная позиция не уводит лист в недоступное место
-      const p = resolveCircle(data.pos[i * 3] / 1000 || 0, data.pos[i * 3 + 1] / 1000 || 0, LEAF_MARGIN);
+      const p = resolveCircle(data.pos[i * 3] / 1000 || 0, data.pos[i * 3 + 1] / 1000 || 0, level.leafMargin);
       this.x[i] = p.x; this.z[i] = p.z;
       this.yaw[i] = data.pos[i * 3 + 2] / 1000 || 0;
     }
@@ -159,40 +140,48 @@ export class LeafField {
 }
 
 export function generateLeaves(seed, count) {
+  const L = level, Z = L.zone, M = L.leafMargin;
   const rng = mulberry32(seed);
   const noise = valueNoise(seed);
   const f = new LeafField(count);
-  const maxD = 4.2;
-  const drift = drifts(rng);
+  const drift = drifts(rng, L.drifts);
   let i = 0;
-  const place = (x, z) => {
+  const place = (x, z, d) => {
     f.x[i] = x; f.z[i] = z;
     f.yaw[i] = rng() * Math.PI * 2;
-    f.tiltX[i] = (rng() - 0.5) * 0.22;
-    f.tiltZ[i] = (rng() - 0.5) * 0.22;
-    f.lift[i] = 0.012 + (i % 23) * 0.0016 + rng() * 0.001;
-    f.scale[i] = 0.75 + rng() * 0.55;
+    if (L.carpet) {
+      // ковёр: листья лежат слоями, толщина слоя растёт с плотностью
+      f.tiltX[i] = (rng() - 0.5) * 0.4;
+      f.tiltZ[i] = (rng() - 0.5) * 0.4;
+      f.lift[i] = 0.004 + rng() * Math.min(0.05, 0.011 * d);
+      f.scale[i] = 0.75 + rng() * 0.5;
+    } else {
+      f.tiltX[i] = (rng() - 0.5) * 0.22;
+      f.tiltZ[i] = (rng() - 0.5) * 0.22;
+      f.lift[i] = 0.012 + (i % 23) * 0.0016 + rng() * 0.001;
+      f.scale[i] = 0.75 + rng() * 0.55;
+    }
     f.shape[i] = Math.floor(rng() * SHAPES);
-    f.bend[i] = rng() < 0.5 ? 0 : 1;
-    // ближе к дереву больше клёна, на дорожке — светлые
+    f.bend[i] = Math.floor(rng() * 256);
     f.color[i] = Math.floor(rng() * PALETTE_SIZE);
     f.state[i] = ON_GROUND;
     i++;
   };
-  const c = STARTER_CLUSTER;
+  const c = L.starter;
   let guard = 0;
-  while (i < Math.min(c.count, count) && guard++ < 100000) {
+  while (c && i < Math.min(c.count, count) && guard++ < 100000) {
     const a = rng() * Math.PI * 2, r = Math.sqrt(rng()) * c.r;
     const x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
-    if (isFree(x, z, LEAF_MARGIN)) place(x, z);
+    if (isFree(x, z, M)) place(x, z, 1);
   }
   guard = 0;
-  while (i < count && guard++ < 2000000) {
-    const x = ZONE.minX + rng() * (ZONE.maxX - ZONE.minX);
-    const z = ZONE.minZ + rng() * (ZONE.maxZ - ZONE.minZ);
-    if (!isFree(x, z, LEAF_MARGIN)) continue;
-    if (rng() * maxD > density(x, z, noise, drift)) continue;
-    place(x, z);
+  while (i < count && guard++ < 5000000) {
+    const x = Z.minX + rng() * (Z.maxX - Z.minX);
+    const z = Z.minZ + rng() * (Z.maxZ - Z.minZ);
+    if (!isFree(x, z, M)) continue;
+    const d = L.density(x, z, noise, drift);
+    if (rng() * L.maxDensity > d) continue;
+    place(x, z, d);
   }
   if (i < count) throw new Error(`leaf generation: placed ${i} of ${count}`);
   return f;
