@@ -6,10 +6,13 @@ import { ZONE } from '../config.js';
 import { CONTAINER, SHOP, TREE, PORCH, PORCH_STEP, GARDEN_GATE, T as FENCE_T, FENCE_H } from '../layout.js';
 import { mulberry32 } from '../leaves.js';
 import { grassTexture, plasterTexture, woodTexture, roofTexture, signTexture, boardTexture, barkTexture } from './textures.js';
+import { placeModel, worldUV } from './yardAssets.js';
 
 const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
 
 function add(parent, geo, mat, x = 0, y = 0, z = 0, { cast = true, receive = true } = {}) {
+  // у материалов из assets/yard текстура повторяется по метрам, а не растягивается на объект
+  if (mat.userData?.tile) worldUV(geo, mat.userData.tile);
   const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
   m.castShadow = cast; m.receiveShadow = receive;
@@ -20,8 +23,9 @@ function add(parent, geo, mat, x = 0, y = 0, z = 0, { cast = true, receive = tru
 const boxAt = (parent, mat, x0, x1, y0, y1, z0, z1, opts) =>
   add(parent, new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), mat, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, opts);
 
-export function buildWorld(scene) {
+export function buildWorld(scene, assets = { mats: {}, models: {} }) {
   const refs = {};
+  const A = assets.mats;
   const MAT = {
     plaster: new THREE.MeshLambertMaterial({ map: plasterTexture() }),
     trim: lambert('#fbf7ee'),
@@ -36,13 +40,19 @@ export function buildWorld(scene) {
     soil: lambert('#5b4331'),
   };
   MAT.roof.map.repeat.set(4, 3);
+  // готовые PBR-материалы (если загрузились) — по одному на вид поверхности
+  if (A.plaster) MAT.plaster = A.plaster;
+  if (A.wood) { MAT.wood = A.wood; MAT.fence = A.wood; }
+  if (A.darkWood) MAT.darkWood = A.darkWood;
+  if (A.roof) MAT.roof = A.roof;
+  if (A.stone) MAT.foundation = A.stone;
 
   // ── свет и небо ──────────────────────────────────────────────
   // солнечный осенний день: низкое тёплое солнце даёт мягкие тени, по которым читаются
   // перекрытия и изгибы листьев; заполняющий свет слабее, чтобы не «сплющивать» картинку
   scene.background = new THREE.Color('#bcd6ee');
   scene.fog = new THREE.Fog('#e8dcc4', 30, 120);
-  const hemi = new THREE.HemisphereLight('#d6e4ff', '#8a6e4a', 0.95);
+  const hemi = new THREE.HemisphereLight('#d6e4ff', '#8a6e4a', 1.15);
   scene.add(hemi);
   const sun = new THREE.DirectionalLight('#ffd9a8', 3.1);
   sun.position.set(-11, 10, 8);
@@ -59,20 +69,24 @@ export function buildWorld(scene) {
   scene.add(skyDome());
 
   // ── земля вокруг участка ─────────────────────────────────────
-  const outerGrass = grassTexture(4, 512, 60);
-  const outer = new THREE.Mesh(new THREE.PlaneGeometry(320, 320), new THREE.MeshLambertMaterial({ map: outerGrass, color: '#e6e8d8' }));
-  outer.rotation.x = -Math.PI / 2;
+  const outerGeo = new THREE.PlaneGeometry(320, 320).rotateX(-Math.PI / 2);
+  const outerMat = A.grass || new THREE.MeshLambertMaterial({ map: grassTexture(4, 512, 60), color: '#e6e8d8' });
+  if (A.grass) worldUV(outerGeo, A.grass.userData.tile);
+  const outer = new THREE.Mesh(outerGeo, outerMat);
   outer.position.y = -0.025;
   outer.receiveShadow = true;
   scene.add(outer);
 
   buildHouse(scene, MAT);
   buildFence(scene, MAT, refs);
-  buildTree(scene, TREE.x, TREE.z, 1.15, 21);
-  buildYardProps(scene, MAT);
+  const M = assets.models;
+  // дерево во дворе: модель Quaternius, нормализованная до 5,5 м, золотистая листва
+  if (M.tree1) placeModel(scene, M.tree1, { x: TREE.x, z: TREE.z, height: 5.5, tint: '#c58b32', rotY: 0.6 });
+  else buildTree(scene, TREE.x, TREE.z, 1.15, 21);
+  buildYardProps(scene, MAT, M);
   refs.container = buildContainer(scene, MAT);
   refs.shop = buildShop(scene, MAT);
-  buildSurroundings(scene, MAT);
+  buildSurroundings(scene, MAT, M);
   return refs;
 }
 
@@ -233,7 +247,11 @@ function buildFence(scene, MAT, refs) {
   add(frame, new THREE.BoxGeometry(0.04, 0.16, 0.05), MAT.metal, 0.7, 1.0, maxZ - 0.06);
   scene.add(frame);
 
-  const inst = new THREE.InstancedMesh(new THREE.BoxGeometry(0.14, 1, 0.024), new THREE.MeshLambertMaterial({ map: boardTexture() }), boards.length);
+  const boardGeo = new THREE.BoxGeometry(0.14, 1, 0.024);
+  // доска с готовой текстурой дуба: UV в метрах (высота доски задаётся масштабом экземпляра)
+  if (MAT.fence.userData?.tile) worldUV(boardGeo, MAT.fence.userData.tile, new THREE.Vector3(1, H, 1));
+  const boardMat = MAT.fence.userData?.tile ? MAT.fence : new THREE.MeshLambertMaterial({ map: boardTexture() });
+  const inst = new THREE.InstancedMesh(boardGeo, boardMat, boards.length);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), c = new THREE.Color();
   boards.forEach(([x, z, a, h], i) => {
     e.set(0, a + Math.PI / 2, (rng() - 0.5) * 0.012);
@@ -295,7 +313,7 @@ export function buildTree(scene, x, z, size, seed) {
 
 
 // ── предметы двора ─────────────────────────────────────────────
-function buildYardProps(scene, MAT) {
+function buildYardProps(scene, MAT, M = {}) {
   // скамейка вдоль оси Z, сиденьем на запад
   const bench = new THREE.Group();
   for (const dz of [-0.75, 0.75]) {
@@ -333,14 +351,19 @@ function buildYardProps(scene, MAT) {
   boxAt(bed, MAT.darkWood, x0, x1, 0, 0.32, z1 - 0.06, z1);
   boxAt(bed, MAT.darkWood, x1 - 0.06, x1, 0, 0.32, z0, z1);
   boxAt(bed, MAT.soil, x0, x1 - 0.06, 0, 0.27, z0 + 0.06, z1 - 0.06);
-  const rng = mulberry32(3);
-  for (let i = 0; i < 5; i++) {
-    const cz = z0 + 0.45 + i * 0.62;
-    const cab = add(bed, new THREE.IcosahedronGeometry(0.2, 1), new THREE.MeshLambertMaterial({ color: i % 2 ? '#7f9a63' : '#8a6a8f', flatShading: true }),
-      (x0 + x1) / 2 + (rng() - 0.5) * 0.2, 0.38, cz);
-    cab.scale.set(1, 0.75, 1);
-  }
   scene.add(bed);
+  if (M.bush) {
+    // кусты в грядке: место уже занято препятствием, листья и проходы не меняются
+    placeModel(scene, M.bush, { x: (x0 + x1) / 2, z: 0.35, height: 0.85, rotY: 0.4, tint: '#6f7f3a' });
+    placeModel(scene, M.bush, { x: (x0 + x1) / 2, z: 1.85, height: 0.7, rotY: 2.1, tint: '#9a8a3e' });
+  } else {
+    const rng = mulberry32(3);
+    for (let i = 0; i < 5; i++) {
+      const cab = add(bed, new THREE.IcosahedronGeometry(0.2, 1), new THREE.MeshLambertMaterial({ color: i % 2 ? '#7f9a63' : '#8a6a8f', flatShading: true }),
+        (x0 + x1) / 2 + (rng() - 0.5) * 0.2, 0.38, z0 + 0.45 + i * 0.62);
+      cab.scale.set(1, 0.75, 1);
+    }
+  }
 
   // бочка для воды
   const barrel = add(scene, new THREE.CylinderGeometry(0.4, 0.36, 0.95, 16), MAT.darkWood, -5.95, 0.475, -8.35);
@@ -482,16 +505,16 @@ function notebookPage() {
 
 // ── за забором: сад, соседи, улица ────────────────────────────
 // За забором: крыши соседних домов, сарай в саду и голые деревья. Пустого поля не видно.
-function buildSurroundings(scene, MAT) {
+function buildSurroundings(scene, MAT, M = {}) {
   const house = (x, z, w, d, h, rot, wall, roof) => {
     const g = new THREE.Group();
-    boxAt(g, lambert(wall), -w / 2, w / 2, 0, h, -d / 2, d / 2);
+    boxAt(g, MAT.plaster.userData?.tile ? MAT.plaster : lambert(wall), -w / 2, w / 2, 0, h, -d / 2, d / 2);
     const shape = new THREE.Shape();
     shape.moveTo(-d / 2 - 0.4, 0); shape.lineTo(d / 2 + 0.4, 0); shape.lineTo(0, d * 0.42); shape.closePath();
     const rg = new THREE.ExtrudeGeometry(shape, { depth: w + 0.6, bevelEnabled: false });
     rg.translate(0, 0, -(w + 0.6) / 2);
     rg.rotateY(Math.PI / 2);
-    add(g, rg, new THREE.MeshLambertMaterial({ map: roofTexture(), color: roof }), 0, h, 0);
+    add(g, rg, MAT.roof.userData?.tile ? MAT.roof : new THREE.MeshLambertMaterial({ map: roofTexture(), color: roof }), 0, h, 0);
     for (let k = -1; k <= 1; k += 2) {
       boxAt(g, lambert('#fbf7ee'), k * w / 4 - 0.5, k * w / 4 + 0.5, h - 1.6, h - 0.6, d / 2, d / 2 + 0.05, { cast: false });
       boxAt(g, lambert('#5d7c91'), k * w / 4 - 0.42, k * w / 4 + 0.42, h - 1.52, h - 0.68, d / 2 + 0.02, d / 2 + 0.07, { cast: false });
@@ -511,10 +534,19 @@ function buildSurroundings(scene, MAT) {
   rf.rotation.z = 0.18;
   shed.position.set(12.5, 0, -4.5);
   scene.add(shed);
-  // голые деревья за забором
-  buildTree(scene, 12, 1.5, 1.05, 41);
-  buildTree(scene, 15, -7, 0.95, 43);
-  buildTree(scene, -12, 5, 1.0, 47);
-  buildTree(scene, -11, -11, 0.9, 53);
-  buildTree(scene, -2, 13, 0.9, 59);
+  if (M.tree1 && M.tree3) {
+    // за забором — ещё три дерева: закрывают горизонт, но это не лес
+    placeModel(scene, M.tree3, { x: 12, z: 1.5, height: 5.8, tint: '#bc6c2f', rotY: 1.2 });
+    placeModel(scene, M.tree1, { x: -12, z: 4, height: 5.2, tint: '#bc6c2f', rotY: 2.5 });
+    placeModel(scene, M.tree3, { x: 9.5, z: -13.5, height: 6, tint: '#c58b32', rotY: 4.0 });
+  } else {
+    buildTree(scene, 12, 1.5, 1.05, 41);
+    buildTree(scene, -12, 5, 1.0, 47);
+  }
+  if (M.bush) {
+    // кусты в саду: видны сквозь решётку ворот
+    placeModel(scene, M.bush, { x: 9.3, z: -2.6, height: 0.95, rotY: 0.3, tint: '#6f7f3a' });
+    placeModel(scene, M.bush, { x: 10.2, z: -1.2, height: 0.8, rotY: 1.7, tint: '#9a8a3e' });
+    placeModel(scene, M.bush, { x: 11.0, z: -3.8, height: 1.05, rotY: 3.1, tint: '#6f7f3a' });
+  }
 }

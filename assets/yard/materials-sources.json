@@ -1,0 +1,87 @@
+{
+  "oak_wood_planks": [
+    {
+      "file": "outputs/yard-assets/materials/oak_wood_planks/color.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/oak_wood_planks/oak_wood_planks_diff_1k.jpg",
+      "md5": "e9e25ac7abcc482f73214fda23e2de25"
+    },
+    {
+      "file": "outputs/yard-assets/materials/oak_wood_planks/normal.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/oak_wood_planks/oak_wood_planks_nor_gl_1k.jpg",
+      "md5": "6a71c23551887b77b29623bb871aefbf"
+    },
+    {
+      "file": "outputs/yard-assets/materials/oak_wood_planks/roughness.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/oak_wood_planks/oak_wood_planks_rough_1k.jpg",
+      "md5": "3609ef0a3155ae90b69395431bf8cec1"
+    }
+  ],
+  "white_plaster_02": [
+    {
+      "file": "outputs/yard-assets/materials/white_plaster_02/color.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/white_plaster_02/white_plaster_02_diff_1k.jpg",
+      "md5": "7b10c2686bcfd76d1f309a20fd06b57e"
+    },
+    {
+      "file": "outputs/yard-assets/materials/white_plaster_02/normal.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/white_plaster_02/white_plaster_02_nor_gl_1k.jpg",
+      "md5": "55fc03203ebf1dc703a380fde93ff502"
+    },
+    {
+      "file": "outputs/yard-assets/materials/white_plaster_02/roughness.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/white_plaster_02/white_plaster_02_rough_1k.jpg",
+      "md5": "8b28f263360b8c4ddbdc4f7c650c4eeb"
+    }
+  ],
+  "stone_wall": [
+    {
+      "file": "outputs/yard-assets/materials/stone_wall/color.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/stone_wall/stone_wall_diff_1k.jpg",
+      "md5": "451e4c5e2309af341fcdc1f1d637b1d6"
+    },
+    {
+      "file": "outputs/yard-assets/materials/stone_wall/normal.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/stone_wall/stone_wall_nor_gl_1k.jpg",
+      "md5": "5c686c6c907ae2a1bb5c438ad96da055"
+    },
+    {
+      "file": "outputs/yard-assets/materials/stone_wall/roughness.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/stone_wall/stone_wall_rough_1k.jpg",
+      "md5": "ddc708ee3b0730ec9c5e79c52990aff1"
+    }
+  ],
+  "grey_roof_tiles": [
+    {
+      "file": "outputs/yard-assets/materials/grey_roof_tiles/color.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grey_roof_tiles/grey_roof_tiles_diff_1k.jpg",
+      "md5": "9a0d2c1ca66e79972c7c35cefa238cf7"
+    },
+    {
+      "file": "outputs/yard-assets/materials/grey_roof_tiles/normal.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grey_roof_tiles/grey_roof_tiles_nor_gl_1k.jpg",
+      "md5": "95003919cdb2fcb2f499594bdf0ee827"
+    },
+    {
+      "file": "outputs/yard-assets/materials/grey_roof_tiles/roughness.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grey_roof_tiles/grey_roof_tiles_rough_1k.jpg",
+      "md5": "19961a96ab55dfe97dd76981c59ccb1a"
+    }
+  ],
+  "grass_ground": [
+    {
+      "file": "outputs/yard-assets/materials/grass_ground/color.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grass_ground/grass_ground_diff_1k.jpg",
+      "md5": "299047258586c762735b7284d3c662c3"
+    },
+    {
+      "file": "outputs/yard-assets/materials/grass_ground/normal.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grass_ground/grass_ground_nor_gl_1k.jpg",
+      "md5": "d518c5b2af6f2c0297bc807b351f511f"
+    },
+    {
+      "file": "outputs/yard-assets/materials/grass_ground/roughness.jpg",
+      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grass_ground/grass_ground_rough_1k.jpg",
+      "md5": "2e6afca246cf6b80bdb53f46fe7e5ce5"
+    }
+  ]
+}

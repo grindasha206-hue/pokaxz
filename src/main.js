@@ -10,6 +10,7 @@ import { buildWorld } from './view/scene.js';
 import { Ground } from './view/ground.js';
 import { LeafView, loadLeafTextures } from './view/leafView.js';
 import { buildFragment } from './view/fragment.js';
+import { loadYardAssets } from './view/yardAssets.js';
 import { UI } from './ui.js';
 import { Sound } from './audio.js';
 
@@ -68,13 +69,15 @@ renderer.autoClear = false;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 400); // ближняя плоскость 0,1 м — точнее глубина, листья не мерцают
 camera.rotation.order = 'YXZ';
-let world, ground;
+let world, ground, yardAssets = null;
 if (FRAGMENT_MODE) {
   world = buildFragment(scene);
   ground = world;
 } else {
-  world = buildWorld(scene);
-  ground = new Ground(field);
+  // готовые материалы и модели двора; при ошибке загрузки сцена строится с запасными
+  yardAssets = await loadYardAssets(renderer);
+  world = buildWorld(scene, yardAssets);
+  ground = new Ground(field, yardAssets.mats.grass);
   scene.add(ground.mesh);
 }
 const leaves = new LeafView(scene, field, leafTextures, { size: level.leafSize });
@@ -693,6 +696,8 @@ if (DEBUG) {
     openShop() { openShop(); },
     hover() { return hoverId; },
     pickState() { return pick && { ...pick }; },
+    assetErrors() { return yardAssets ? yardAssets.errors : []; },
+    renderInfo() { const r = renderer.info.render; return { calls: r.calls, triangles: r.triangles, textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries }; },
     leafY(i) { return { lift: field.lift[i], shown: leaves.shown[i] }; },
     startPick() { if (hoverId >= 0) pick = { target: hoverId, elapsed: 0, duration: economy.pickTime }; },
     setPickProgress(p) { if (pick) pick.elapsed = p * pick.duration; },

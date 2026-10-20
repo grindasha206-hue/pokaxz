@@ -1,0 +1,28 @@
+[
+  {
+    "name": "CommonTree_1",
+    "file": "models/CommonTree_1.gltf",
+    "triangles": 6265,
+    "materials": [
+      "Bark_NormalTree",
+      "Leaves_NormalTree"
+    ]
+  },
+  {
+    "name": "CommonTree_3",
+    "file": "models/CommonTree_3.gltf",
+    "triangles": 3505,
+    "materials": [
+      "Bark_NormalTree",
+      "Leaves_NormalTree"
+    ]
+  },
+  {
+    "name": "Bush_Common",
+    "file": "models/Bush_Common.gltf",
+    "triangles": 900,
+    "materials": [
+      "Leaves_TwistedTree"
+    ]
+  }
+]

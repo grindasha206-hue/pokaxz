@@ -137,6 +137,8 @@
     </div>
   </div>
 
+  <!-- GLTFLoader из three.js импортирует «three» по имени: указываем ту же локальную копию -->
+  <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
   <script type="module" src="src/main.js"></script>
 </body>
 </html>
