@@ -1,7 +1,7 @@
 // Сохранение: сериализация, localStorage, экспорт и восстановление.
 
 import { SAVE_KEY, SAVE_VERSION } from './config.js';
-import { level } from './layout.js';
+import { level, ZONE_ORDER } from './layout.js';
 
 export const DEFAULT_SETTINGS = {
   sensitivity: 1,       // множитель чувствительности обзора
@@ -21,7 +21,8 @@ export function buildSave(game) {
     savedAt: new Date().toISOString(),
     seed: game.seed,
     progress: game.economy.progress,
-    zones: { [level.id]: game.field.serialize() },
+    zones: { ...(game.zones ?? {}), [level.id]: game.field.serialize() },
+    currentZone: game.nextZone ?? level.id,
     openZones: game.openZones,
     hints: game.hints,
     settings: game.settings,
@@ -36,10 +37,11 @@ export function parseSave(text) {
   let data;
   try { data = typeof text === 'string' ? JSON.parse(text) : text; } catch { throw new Error('Файл не похож на сохранение'); }
   if (!data || typeof data !== 'object') throw new Error('Файл не похож на сохранение');
-  if (![1, 2, SAVE_VERSION].includes(data.version)) throw new Error(`Неизвестная версия сохранения: ${data.version}`);
+  if (![1, 2, 3, SAVE_VERSION].includes(data.version)) throw new Error(`Неизвестная версия сохранения: ${data.version}`);
   if (!Number.isInteger(data.seed)) throw new Error('В сохранении нет зерна участка');
   if (!data.progress || !data.progress.upgrades) throw new Error('В сохранении нет покупок');
-  if (!data.zones || !data.zones[level.id]) throw new Error('В сохранении нет состояния двора');
+  if (!data.zones || typeof data.zones !== 'object' || !data.zones.yard) throw new Error('В сохранении нет состояния двора');
+  if (data.currentZone !== undefined && !ZONE_ORDER.includes(data.currentZone)) throw new Error(`Неизвестная зона: ${data.currentZone}`);
   return data;
 }
 
@@ -48,7 +50,7 @@ export function parseSave(text) {
  * один к одному: игра предлагает экспортировать такой прогресс и начать заново.
  */
 export function isLegacySave(data) {
-  return !!data && data.version !== SAVE_VERSION;
+  return !!data && (data.version === 1 || data.version === 2);
 }
 
 /** Исходный текст сохранения из хранилища (для экспорта прежнего прогресса). */

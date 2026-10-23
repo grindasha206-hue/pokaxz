@@ -41,16 +41,40 @@ export const UPGRADES = {
 
 export const BRANCHES = Object.keys(UPGRADES);
 
-// Инструменты из таблицы, которых в игре ещё нет: показываются в блокноте, но не продаются.
-export const LOCKED_TOOLS = [
-  {
-    title: 'Грабли', price: usd(7.49), info: 'сгребать листья в кучи и в приёмники',
-    upgrades: [
-      { title: 'Длина черенка', prices: [3.50, 6.00, 8.50, 11.00].map(usd), info: 'до 2,2 м, дальность до 0,7 м' },
-      { title: 'Ширина захвата', prices: [4.00, 6.75, 9.50, 12.25, 14.00].map(usd), info: '0,45 → 0,6 м' },
-      { title: 'Цепкость листьев', prices: [5.00, 6.50, 8.00, 9.50].map(usd), info: '0,8 → 1' },
-    ],
+// ── инструменты ──────────────────────────────────────────────
+// Грабли — по таблице Leaf it Alone: покупка и три ветки улучшений; values[0] — без улучшений.
+// Длина черенка задаёт, как далеко ставятся грабли, и путь листьев за один взмах.
+export const RAKE = {
+  title: 'Грабли', price: usd(7.49), info: 'сгребают листья в кучи и в приёмники',
+  branches: {
+    handle: {
+      title: 'Длина черенка', hint: 'дальность и путь за взмах',
+      values: [2.0, 2.05, 2.1, 2.15, 2.2], dist: [0.62, 0.64, 0.66, 0.68, 0.7],
+      unit: (v, k) => `${v.toFixed(2).replace('.', ',')} м, ${RAKE.branches.handle.dist[k].toFixed(2).replace('.', ',')} м за взмах`,
+      prices: [3.50, 6.00, 8.50, 11.00].map(usd),
+    },
+    sweep: {
+      title: 'Ширина захвата', hint: 'радиус граблей',
+      values: [0.45, 0.48, 0.51, 0.54, 0.57, 0.6],
+      unit: (v) => `${v.toFixed(2).replace('.', ',')} м`,
+      prices: [4.00, 6.75, 9.50, 12.25, 14.00].map(usd),
+    },
+    sticky: {
+      title: 'Цепкость листьев', hint: 'какая доля листьев идёт за граблями',
+      values: [0.8, 0.85, 0.9, 0.95, 1],
+      unit: (v) => `${Math.round(v * 100)} %`,
+      prices: [5.00, 6.50, 8.00, 9.50].map(usd),
+    },
   },
+};
+export const RAKE_BRANCHES = Object.keys(RAKE.branches);
+// Взмах граблями: голова ставится в точку взгляда (не дальше 0,65 длины черенка) и тянется
+// к игроку на dist метров. time — длительность взмаха, reach — сколько захватывают зубья за головой,
+// back — глубина валика перед зубьями, carry — сколько листьев валик может тащить за раз.
+export const RAKE_STROKE = { time: 0.42, reachK: 0.65, minStart: 1.05, reach: 0.14, back: 0.12, carry: 400 };
+
+// Воздуходувки в игре ещё нет: показывается в блокноте, но не продаётся.
+export const LOCKED_TOOLS = [
   {
     title: 'Воздуходувка', price: usd(49.99), info: 'гнать листья по двору и в приёмники',
     upgrades: [
@@ -99,7 +123,8 @@ export const GRAB_RADIUS = 2.4;
 export const REMAINING_HIGHLIGHT = 12;
 
 export const SAVE_KEY = 'leaf-yard-save-v1';
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
+// v4 — несколько зон, инструменты и приёмники; v3 (доллары, одна зона) загружается без потерь.
 // v1, v2 — прежняя экономика в монетах. Такие сохранения не пересчитываются в доллары:
 // игра предлагает экспортировать их и начать заново (см. isLegacySave, main.js).
 export const LEGACY_BACKUP_KEY = 'leaf-yard-save-legacy-backup';

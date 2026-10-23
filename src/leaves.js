@@ -67,6 +67,12 @@ export class LeafField {
     this.tiltZ = new Float32Array(count);
     this.lift = new Float32Array(count);   // высота над поверхностью: на земле или на листьях под ним
     this.flat = new Float32Array(count).fill(1); // множитель наклона: без опоры лист ложится плашмя
+    this.moved = new Uint8Array(count);           // 1 — лист сдвинут с места генерации (граблями и т. п.)
+    // порядок укладки: лист лежит поверх соседей с меньшим order. Сначала order = индекс,
+    // сдвинутый лист получает новый, наибольший — и ложится сверху кучи.
+    this.order = new Float64Array(count);
+    for (let i = 0; i < count; i++) this.order[i] = i;
+    this.topOrder = count;
     this.scale = new Float32Array(count);
     this.shape = new Uint8Array(count);
     this.bend = new Uint8Array(count);
@@ -114,10 +120,68 @@ export class LeafField {
   /** Сдвигает лежащий лист (для будущих граблей и воздуходувки); лист не попадает в препятствие. */
   nudge(i, dx, dz) {
     if (this.state[i] !== ON_GROUND) return;
-    const p = resolveCircle(this.x[i] + dx, this.z[i] + dz, level.leafMargin);
-    this.x[i] = p.x; this.z[i] = p.z;
-    this.grid = null;
+    this.moveTo(i, this.x[i] + dx, this.z[i] + dz);
     this.version++;
+  }
+
+  /** Ставит лист в точку (с выталкиванием из препятствий). Сетку и версию обновляет вызывающий. */
+  moveTo(i, x, z) {
+    const p = resolveCircle(x, z, level.leafMargin);
+    this.x[i] = p.x; this.z[i] = p.z;
+    this.moved[i] = 1;
+    this.order[i] = this.topOrder++;
+    this.grid = null;
+  }
+
+  /** Индексы листьев в порядке укладки (снизу вверх). */
+  stackOrder() {
+    const idx = Array.from({ length: this.count }, (_, i) => i);
+    if (this.topOrder > this.count) idx.sort((a, b) => this.order[a] - this.order[b]);
+    return idx;
+  }
+
+  /**
+   * Пересчитывает высоту листьев после сдвига: всё в прямоугольнике вокруг старых и новых
+   * позиций (снизу вверх), затем листья за его краем, лежавшие на изменившихся.
+   */
+  resettle(minX, minZ, maxX, maxZ) {
+    if (!this.grid) this.buildGrid();
+    const m = LEAF_EXTENT, ids = [];
+    for (let i = 0; i < this.count; i++) {
+      if (this.state[i] !== ON_GROUND) continue;
+      if (this.x[i] < minX - m || this.x[i] > maxX + m || this.z[i] < minZ - m || this.z[i] > maxZ + m) continue;
+      ids.push(i);
+    }
+    ids.sort((a, b) => this.order[a] - this.order[b]);
+    const tmp = [], changed = [];
+    for (const i of ids) {
+      const before = this.lift[i];
+      this.settle(i, tmp);
+      if (Math.abs(this.lift[i] - before) > 1e-5) changed.push(i);
+    }
+    const more = this.settleAfter(changed);
+    this.version++;
+    return [...ids, ...more];
+  }
+
+  /** Лежащие листья в круге (x, z, r). */
+  leavesNear(x, z, r, out = []) {
+    if (!this.grid) this.buildGrid();
+    out.length = 0;
+    const n = Math.ceil(r / STACK_R);
+    const cx = Math.floor(x / STACK_R), cz = Math.floor(z / STACK_R);
+    for (let dx = -n; dx <= n; dx++) {
+      for (let dz = -n; dz <= n; dz++) {
+        const arr = this.grid.get((cx + dx) * 65536 + (cz + dz));
+        if (!arr) continue;
+        for (const j of arr) {
+          if (this.state[j] !== ON_GROUND) continue;
+          const ddx = this.x[j] - x, ddz = this.z[j] - z;
+          if (ddx * ddx + ddz * ddz <= r * r) out.push(j);
+        }
+      }
+    }
+    return out;
   }
 
   // ── укладка: лист лежит на земле или на листьях, которые под ним ──────────
@@ -162,7 +226,7 @@ export class LeafField {
   settle(i, tmp = []) {
     let below = -1;
     for (const j of this.neighbours(i, tmp)) {
-      if (j < i && this.state[j] === ON_GROUND && this.lift[j] > below) below = this.lift[j];
+      if (this.order[j] < this.order[i] && this.state[j] === ON_GROUND && this.lift[j] > below) below = this.lift[j];
     }
     // без опоры лист ложится почти плашмя (до 3°), на других листьях — с исходным наклоном
     const tilt0 = Math.max(Math.abs(this.tiltX[i]), Math.abs(this.tiltZ[i]));
@@ -175,7 +239,7 @@ export class LeafField {
 
   settleAll() {
     const tmp = [];
-    for (let i = 0; i < this.count; i++) this.settle(i, tmp);
+    for (const i of this.stackOrder()) this.settle(i, tmp);
     this.version++;
   }
 
@@ -185,7 +249,7 @@ export class LeafField {
     while (queue.length) {
       const r = queue.pop();
       for (const j of [...this.neighbours(r, tmp)]) {
-        if (j <= r || this.state[j] !== ON_GROUND) continue;
+        if (this.order[j] <= this.order[r] || this.state[j] !== ON_GROUND) continue;
         const before = this.lift[j];
         this.settle(j);
         if (Math.abs(this.lift[j] - before) > 1e-5) {
@@ -198,33 +262,50 @@ export class LeafField {
     return [...changed];
   }
 
+  /**
+   * Состояние каждого листа строкой и позиции только сдвинутых листьев (в мм):
+   * остальные восстанавливаются генерацией. Так 100 тыс. листьев занимают ~100 КБ, а не мегабайты.
+   */
   serialize() {
-    const pos = new Array(this.count * 3);
+    const m = [];
     for (let i = 0; i < this.count; i++) {
-      pos[i * 3] = Math.round(this.x[i] * 1000);
-      pos[i * 3 + 1] = Math.round(this.z[i] * 1000);
-      pos[i * 3 + 2] = Math.round(this.yaw[i] * 1000);
+      if (!this.moved[i] || this.state[i] !== ON_GROUND) continue;
+      m.push(i, Math.round(this.x[i] * 1000), Math.round(this.z[i] * 1000), Math.round(this.yaw[i] * 1000), this.order[i] - this.count);
     }
-    return { state: Array.from(this.state).join(''), pos };
+    return { state: Array.from(this.state).join(''), m };
   }
 
   /** Восстанавливает состояние и позиции. Возвращает false, если данные не подходят. */
   restore(data) {
     if (!data || typeof data.state !== 'string' || data.state.length !== this.count) return false;
-    if (!Array.isArray(data.pos) || data.pos.length !== this.count * 3) return false;
+    // v4: m — только сдвинутые листья [i, x, z, yaw, порядок, …]; v3: pos — позиции всех листьев
+    const full = Array.isArray(data.pos) && data.pos.length === this.count * 3;
+    if (!full && !Array.isArray(data.m ?? [])) return false;
     for (let i = 0; i < this.count; i++) {
       const s = data.state.charCodeAt(i) - 48;
       if (s !== ON_GROUND && s !== IN_BAG && s !== SOLD) return false;
     }
+    const place = (i, sx, sz, syaw) => {
+      // позиция не менялась (сохранение округляет до мм) — оставляем точную, чтобы укладка совпала
+      if (Math.abs(sx - this.x[i]) < 0.0015 && Math.abs(sz - this.z[i]) < 0.0015 && Math.abs(syaw - this.yaw[i]) < 0.0015) return;
+      // даже испорченная позиция не уводит лист в недоступное место
+      this.moveTo(i, sx, sz);
+      this.yaw[i] = syaw;
+    };
     for (let i = 0; i < this.count; i++) {
       this.state[i] = data.state.charCodeAt(i) - 48;
-      const sx = data.pos[i * 3] / 1000 || 0, sz = data.pos[i * 3 + 1] / 1000 || 0, syaw = data.pos[i * 3 + 2] / 1000 || 0;
-      // позиция не менялась (сохранение округляет до мм) — оставляем точную, чтобы укладка совпала
-      if (Math.abs(sx - this.x[i]) < 0.0015 && Math.abs(sz - this.z[i]) < 0.0015 && Math.abs(syaw - this.yaw[i]) < 0.0015) continue;
-      // даже испорченная позиция не уводит лист в недоступное место
-      const p = resolveCircle(sx, sz, level.leafMargin);
-      this.x[i] = p.x; this.z[i] = p.z;
-      this.yaw[i] = syaw;
+      if (full) place(i, data.pos[i * 3] / 1000 || 0, data.pos[i * 3 + 1] / 1000 || 0, data.pos[i * 3 + 2] / 1000 || 0);
+    }
+    if (!full) {
+      const m = data.m ?? [];
+      for (let k = 0; k + 4 < m.length; k += 5) {
+        const i = m[k], ord = m[k + 4];
+        if (!Number.isInteger(i) || i < 0 || i >= this.count) continue;
+        this.moveTo(i, m[k + 1] / 1000 || 0, m[k + 2] / 1000 || 0);
+        this.yaw[i] = m[k + 3] / 1000 || 0;
+        if (Number.isFinite(ord) && ord >= 0) this.order[i] = this.count + ord;
+      }
+      for (let i = 0; i < this.count; i++) this.topOrder = Math.max(this.topOrder, this.order[i] + 1);
     }
     this.grid = null;
     this.settleAll();

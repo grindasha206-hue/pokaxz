@@ -196,7 +196,7 @@ assert.ok(!(await page.isDisabled('#start-btn')));
 const legacyAfter = await page.evaluate(() => ({ v: JSON.parse(localStorage.getItem('leaf-yard-save-v1')).version,
   money: JSON.parse(localStorage.getItem('leaf-yard-save-v1')).progress.money,
   backup: JSON.parse(localStorage.getItem('leaf-yard-save-legacy-backup')).progress.coins }));
-assert.deepEqual(legacyAfter, { v: 3, money: 0, backup: 420 }, 'новая игра с $0,00, копия прежнего сохранения осталась');
+assert.deepEqual(legacyAfter, { v: 4, money: 0, backup: 420 }, 'новая игра с $0,00, копия прежнего сохранения осталась');
 
 assert.deepEqual(errors, []);
 console.log('smoke ok', restored);

@@ -1,10 +1,13 @@
 // Точка входа: сцена, управление, цикл игры, сохранение.
 
 import * as THREE from '../vendor/three.module.min.js';
-import { PLAYER, UPGRADES, REMAINING_HIGHLIGHT, ZONE, LEGACY_BACKUP_KEY, formatGain, plural } from './config.js';
-import { level, setLevel, distToObstacle, resolveCircle, segmentBlocked, surfaceHeight } from './layout.js';
+import { PLAYER, UPGRADES, RAKE, RAKE_STROKE, REMAINING_HIGHLIGHT, LEGACY_BACKUP_KEY, formatGain, formatMoney, plural } from './config.js';
+import { level, setLevel, distToObstacle, resolveCircle, segmentBlocked, surfaceHeight, ZONE_ORDER, LEVELS, ARRIVALS } from './layout.js';
 import { ON_GROUND } from './leaves.js';
-import { createGame } from './game.js';
+import { createGame, zoneUnlocked } from './game.js';
+import { ALL_INLETS } from './economy.js';
+import { rakeStats, strokeSpan, rakeStroke, activeInlets } from './rake.js';
+import { RakeView } from './view/rakeView.js';
 import { buildSave, parseSave, readLocal, readLocalRaw, writeLocal, clearLocal, isLegacySave } from './save.js';
 import { buildWorld } from './view/scene.js';
 import { Ground } from './view/ground.js';
@@ -19,13 +22,11 @@ const DEBUG = params.has('debug');
 const LEAF_OVERRIDE = params.has('leaves') ? Math.max(1, parseInt(params.get('leaves'), 10) || 600) : null;
 // ?fragment — небольшой участок для проверки ковра из листьев и подбора
 const FRAGMENT_MODE = params.has('fragment');
-if (FRAGMENT_MODE) setLevel('fragment');
 // режим замера, фрагмент и чистый старт не трогают настоящее сохранение
 const NO_SAVE = params.has('fresh') || LEAF_OVERRIDE !== null || FRAGMENT_MODE;
 const FORCE_FPS = params.has('fps') || LEAF_OVERRIDE !== null;
 
 const ui = new UI();
-document.getElementById('zone-name').textContent = level.name;
 const sound = new Sound();
 
 // ── загрузка ─────────────────────────────────────────────────
@@ -39,14 +40,26 @@ let legacyText = null, legacyPending = false;
     legacyPending = true;
     saved = null;
   }
+  // активная зона: из сохранения; ?zone=garden — только для проверки без сохранения
+  const want = NO_SAVE ? params.get('zone') : saved?.currentZone;
+  if (FRAGMENT_MODE) setLevel('fragment');
+  else if (ZONE_ORDER.includes(want)) setLevel(want);
   try {
     game = createGame(saved, { leafCount: LEAF_OVERRIDE ?? undefined });
     if (saved) startNote = 'Продолжаем с сохранения.';
     if (game.fixes.length) console.warn('save fixes', game.fixes);
   } catch (e) {
     console.warn(e);
-    game = createGame(null);
-    startNote = 'Сохранение не удалось прочитать — начата новая игра.';
+    // повреждена не двор, а другая зона — сначала пробуем вернуться во двор с тем же прогрессом
+    let ok = false;
+    if (saved && level.id !== 'yard') {
+      try { setLevel('yard'); game = createGame(saved); ok = true; startNote = `Зона «${LEVELS[want]?.name}» в сохранении повреждена — вы во дворе.`; } catch { /* дальше — новая игра */ }
+    }
+    if (!ok) {
+      setLevel('yard');
+      game = createGame(null);
+      startNote = 'Сохранение не удалось прочитать — начата новая игра.';
+    }
   }
   if (NO_SAVE) {
     startNote = FRAGMENT_MODE ? `Фрагмент для оценки листьев: ${game.field.count} листьев, прогресс не сохраняется.`
@@ -54,6 +67,7 @@ let legacyText = null, legacyPending = false;
   }
 }
 const { field, economy, settings } = game;
+document.getElementById('zone-name').textContent = level.name;
 
 // шрифт для табличек в сцене
 try {
@@ -82,10 +96,17 @@ if (FRAGMENT_MODE) {
   // готовые материалы и модели двора; при ошибке загрузки сцена строится с запасными
   yardAssets = await loadYardAssets(renderer);
   world = buildWorld(scene, yardAssets);
-  ground = new Ground(field, yardAssets.mats.grass);
-  scene.add(ground.mesh);
+  // во дворе — своя земля с дорожкой; в саду — общий газон вокруг участков
+  if (level.id === 'yard') {
+    ground = new Ground(field, yardAssets.mats.grass);
+    scene.add(ground.mesh);
+  } else ground = { update() {} };
 }
 const leaves = new LeafView(scene, field, leafTextures, { size: level.leafSize });
+const rakeView = new RakeView(scene);
+// приёмники сада видны и из двора: открыта решётка или крышка
+for (const [id, v] of world.inlets ?? []) v.setOwned(ALL_INLETS.some((n) => n.id === id && (n.price === 0 || economy.progress.inlets.includes(id))));
+ui.tools('hand', !!economy.rake);
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -117,11 +138,14 @@ let ignoreClicksUntil = 0;      // клик, которым захватили �
 let pick = null;                // { target, elapsed, duration }
 let hoverId = -1, hoverGroup = [];
 let fullHintUntil = 0, lastDenied = 0;
+let tool = 'hand';              // hand | rake
+let stroke = null;              // взмах граблей: { t, span, done }
+let rakeIdle = 0;               // сколько голова граблей лежит без дела (для возврата в исходную точку)
 let now = 0;
 let dirty = false, lastSave = 0;
 let lastStep = 0;
 
-const GAME_KEYS = new Set(['Tab', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyF', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+const GAME_KEYS = new Set(['Tab', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyF', 'KeyQ', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
 document.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) {
@@ -150,9 +174,9 @@ document.addEventListener('keydown', (e) => {
       } else pickRequested = true;
       break;
     case 'KeyF': interact(); break;
-    case 'Digit1': selectTool(1); break;
-    case 'Digit2': selectTool(2); break;
-    case 'Digit3': selectTool(3); break;
+    case 'Digit1': selectTool('hand'); break;
+    case 'Digit2': selectTool('rake'); break;
+    case 'KeyQ': selectTool(tool === 'hand' ? 'rake' : 'hand'); break;
   }
 });
 document.addEventListener('keyup', (e) => {
@@ -323,15 +347,30 @@ if (legacyPending) {
 }
 
 // ── действия ─────────────────────────────────────────────────
-function selectTool(n) {
-  // пока есть только рука; грабли и воздуходувка появятся в слотах 2 и 3
-  void n;
+function selectTool(name) {
+  if (name === 'rake' && !economy.rake) {
+    ui.toast(`Грабли продаются в блокноте (<kbd>Tab</kbd>) за ${formatMoney(RAKE.price)}`, 2200);
+    return;
+  }
+  if (name === tool) return;
+  tool = name;
+  pick = null; stroke = null;
+  ui.tools(tool, !!economy.rake);
+  if (tool === 'rake' && !game.hints.raked) {
+    ui.toast('Грабли: наведите на листья и удерживайте кнопку — листья тянутся к вам. ' +
+      'Протащите кучу над приёмником, и она продастся сразу. <kbd>1</kbd> — рука', 6000);
+  }
 }
 
 function nearest() {
   // ближайший объект для F, к которому игрок стоит лицом
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   let best = null, bestD = Infinity;
+  (level.gates ?? []).forEach((g, k) => {
+    const dx = g.x - player.x, dz = g.z - player.z, d = Math.hypot(dx, dz);
+    if (d > 1.7 || (dx * fx + dz * fz) / (d || 1) < 0.3) return;
+    if (d < bestD) { bestD = d; best = `gate:${k}`; }
+  });
   for (const id of ['container', 'shop']) {
     const o = level.obstacles.find((ob) => ob.id === id);
     if (!o) continue;
@@ -349,6 +388,29 @@ function interact() {
   const target = nearest();
   if (target === 'container') deposit();
   else if (target === 'shop') openShop();
+  else if (target?.startsWith('gate:')) useGate(level.gates[+target.slice(5)]);
+}
+
+/** Почему нельзя пройти в ворота (или null — можно). */
+function gateBlock(g) {
+  if (!g.to) return g.locked;
+  if (!zoneUnlocked(economy.progress, g.to)) return g.locked;
+  if (economy.inBag > 0) return 'Сначала сдайте мешок в контейнер';
+  if (NO_SAVE) return 'В режиме без сохранения переход между зонами отключён';
+  return null;
+}
+
+function useGate(g) {
+  const why = gateBlock(g);
+  if (why) { ui.toast(why, 2600); sound.denied(); return; }
+  // переход: сохраняем, что игрок уже в новой зоне у ворот, и загружаем её
+  stopWork();
+  game.nextZone = g.to;
+  game.player = { ...ARRIVALS[`${level.id}>${g.to}`] };
+  saveNow();
+  skipSave = true;
+  ui.toast(`Переходим: ${LEVELS[g.to].name}…`, 4000);
+  setTimeout(() => location.reload(), 250);
 }
 
 const tmpV = new THREE.Vector3(), tmpFrom = new THREE.Vector3();
@@ -368,29 +430,43 @@ function deposit() {
   lidOpenUntil = now + 0.9;
   if (!game.hints.deposited) game.hints.deposited = true;
   ui.toast(`Сдано ${n} ${plural(n, 'лист', 'листа', 'листьев')}: <b>${formatGain(economy.lastGain)}</b>`, 2000);
-  if (economy.remaining === 0) {
-    setTimeout(() => ui.toast('Двор чист! Сад откроется в следующей версии игры.', 5000), 2100);
-  }
+  if (economy.remaining === 0) setTimeout(() => ui.toast(zoneDoneText(), 5000), 2100);
   saveNow();
 }
 
+function zoneDoneText() {
+  return level.id === 'yard' ? 'Двор чист! Ворота в сад — в восточном заборе, <kbd>F</kbd> у ворот.'
+    : `${level.name}: чисто! Следующая зона появится в новой версии игры.`;
+}
+
 const buyLock = new Map();
-function buy(branch, btn) {
+function buy(key, btn) {
   const t = performance.now();
-  if (t - (buyLock.get(branch) ?? 0) < 250) return; // защита от двойного клика
-  buyLock.set(branch, t);
+  if (t - (buyLock.get(key) ?? 0) < 250) return; // защита от двойного клика
+  buyLock.set(key, t);
   const before = economy.money;
-  const res = economy.buy(branch);
+  const res = economy.buy(key);
   if (!res) { sound.denied(); btn?.classList.add('flash'); return; }
   sound.purchase();
   ui.money(economy.money, economy.money - before);
   ui.bag(economy.inBag, economy.capacity);
   game.hints.bought = true;
-  const u = UPGRADES[branch];
-  const text = branch === 'grab' ? `теперь ${u.unit(res.value)} за раз`
-    : branch === 'speed' ? `подбор за ${u.unit(res.value)}`
-      : `в мешок помещается ${u.unit(res.value)}`;
-  ui.toast(`${u.title} улучшен: <b>${text}</b>`, 2600);
+  let text;
+  if (UPGRADES[key]) {
+    const u = UPGRADES[key];
+    text = `${u.title} улучшен: <b>${key === 'grab' ? `теперь ${u.unit(res.value)} за раз`
+      : key === 'speed' ? `подбор за ${u.unit(res.value)}` : `в мешок помещается ${u.unit(res.value)}`}</b>`;
+  } else if (key === 'rake') {
+    text = 'Куплены <b>грабли</b>: клавиша <kbd>2</kbd> или <kbd>Q</kbd>';
+    ui.tools(tool, true);
+  } else if (key.startsWith('rake:')) {
+    const b = RAKE.branches[key.slice(5)];
+    text = `${b.title}: <b>${b.unit(res.value, res.level)}</b>`;
+  } else {
+    text = `${res.inlet.name} открыт`;
+    world.inlets?.get(res.inlet.id)?.setOwned(true);
+  }
+  ui.toast(text, 2600);
   renderShop();
   saveNow();
 }
@@ -494,6 +570,80 @@ function updatePicking(dt) {
   }
 }
 
+// ── грабли ───────────────────────────────────────────────────
+// Взмах начинается нажатием (удержание — взмахи подряд). Листья сдвигаются сразу в логике,
+// а на экране едут вместе с головой граблей. Над приёмником куча проваливается и продаётся.
+const PULL = 0.7; // доля взмаха на протяжку, остальное — возврат головы
+
+function rakeSpanNow() {
+  const st = rakeStats(economy.rake);
+  camera.getWorldDirection(camDir);
+  let aim = Infinity;
+  if (camDir.y < -0.02) aim = (player.eye - surfaceHeight(player.x, player.z)) / -camDir.y * Math.hypot(camDir.x, camDir.z);
+  let span = strokeSpan(st, aim);
+  // голова не заходит за забор и стены: укорачиваем взмах, пока путь свободен
+  const dx = -Math.sin(player.yaw), dz = -Math.cos(player.yaw);
+  while (span.start > RAKE_STROKE.minStart) {
+    const far = span.start + RAKE_STROKE.reach;
+    if (!segmentBlocked(player.x, 0.1, player.z, player.x + dx * far, 0.1, player.z + dz * far)) break;
+    span = { start: span.start - 0.1, end: span.end - 0.1 };
+  }
+  return { st, span };
+}
+
+let rakeSpan = null;
+function updateRake(dt) {
+  const held = mouseHeld || (settings.collectMode === 'hold' && keys.has('KeyE'));
+  const want = pickRequested || autoCollect || held;
+  pickRequested = false;
+  hoverId = -1; hoverGroup = [];
+  const { st, span } = rakeSpanNow();
+  rakeSpan = span;
+  rakeView.setWidth(st.width);
+  if (stroke) {
+    stroke.t += dt;
+    if (stroke.t >= RAKE_STROKE.time) stroke = null;
+  }
+  if (stroke || !want) return;
+  stroke = { t: 0, span };
+  const p = { x: player.x, z: player.z, yaw: player.yaw };
+  const r = rakeStroke(field, p, st, span, activeInlets(economy.progress));
+  sound.rake?.();
+  if (!r.moved.length && !r.absorbed.length) return;
+  const pull = RAKE_STROKE.time * PULL;
+  leaves.slide(r.moved, field.resettle(...r.box), now, pull);
+  let n = 0, gain = 0;
+  for (const a of r.absorbed) {
+    const k = economy.sellDirect(a.ids);
+    n += k; gain += economy.lastGain;
+    leaves.sink(a.from, a.inlet, now, pull + 0.2);
+  }
+  sound.rustle(Math.min(10, Math.ceil(r.moved.length / 8) + n));
+  if (n) {
+    ui.money(economy.money, gain);
+    ui.toast(`В приёмник: ${n} ${plural(n, 'лист', 'листа', 'листьев')} · <b>${formatGain(gain)}</b>`, 1400);
+    sound.deposit(Math.min(n, 30));
+    for (const rw of economy.checkRewards()) {
+      setTimeout(() => ui.toast(`${level.name} убран на ${Math.round(rw.at * 100)} %: <b>${rw.text}</b>`, 3600), 400);
+      saveNow();
+    }
+    if (economy.remaining === 0 && economy.inBag === 0) setTimeout(() => ui.toast(zoneDoneText(), 5000), 1600);
+  }
+  game.hints.raked = true;
+  dirty = true;
+}
+
+/** Где голова граблей сейчас: расстояние от игрока и подъём (возврат после протяжки). */
+function rakeHead() {
+  const span = rakeSpan ?? { start: RAKE_STROKE.minStart, end: 0.5 };
+  if (!stroke) return { d: span.start, lift: 0.015 };
+  const u = stroke.t / RAKE_STROKE.time, s = stroke.span;
+  const ease = (x) => x * x * (3 - 2 * x);
+  if (u < PULL) return { d: s.start - (s.start - s.end) * ease(u / PULL), lift: 0 };
+  const v = (u - PULL) / (1 - PULL);
+  return { d: s.end + (span.start - s.end) * ease(v), lift: Math.sin(v * Math.PI) * 0.12 };
+}
+
 // ── движение ─────────────────────────────────────────────────
 function updateMovement(dt) {
   let ix = 0, iz = 0;
@@ -532,6 +682,11 @@ function updateHints() {
   const full = economy.free === 0;
   const near = nearest();
   world.container.arrow.visible = full;
+  if (near?.startsWith('gate:')) {
+    const g = level.gates[+near.slice(5)], why = gateBlock(g);
+    ui.bagNote(why ?? `<kbd>F</kbd> ${LEVELS[g.to].name}`, { full: !!why && full });
+    return;
+  }
   if (full && near !== 'container') {
     const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
     const rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
@@ -666,7 +821,8 @@ function frame(t) {
   camera.rotation.set(player.pitch, player.yaw, 0);
   camera.updateMatrixWorld();
   if (state === 'playing') {
-    updatePicking(dt);
+    if (tool === 'rake') updateRake(dt);
+    else updatePicking(dt);
     if (dirty && now - lastSave > 10) saveNow();
   } else {
     hoverId = -1; hoverGroup = [];
@@ -674,7 +830,7 @@ function frame(t) {
   leaves.setWobble(pick ? pick.target : -1, pick ? Math.min(1, pick.elapsed / pick.duration) : 0, now);
   leaves.setHighlight(pick ? pick.target : hoverId, pick ? groupFor(pick.target) : hoverGroup);
   updateHints();
-  ui.crosshair(hoverId >= 0 || !!pick, pick ? Math.min(1, pick.elapsed / pick.duration) : null);
+  if (tool === 'hand') ui.crosshair(hoverId >= 0 || !!pick, pick ? Math.min(1, pick.elapsed / pick.duration) : null);
   ui.money(economy.money);
   ui.bag(economy.inBag, economy.capacity);
   ui.zone(economy.cleanedRatio, economy.remaining);
@@ -689,6 +845,12 @@ function frame(t) {
   }
 
   leaves.update(now, dt, camera, settings.highlightLast ? remainingIds : null);
+  if (tool === 'rake') {
+    const h = rakeHead();
+    rakeView.update(true, player, camera, h.d, h.lift, rakeSpan ?? { start: h.d, end: h.d - 0.6 });
+    ui.crosshair(false, stroke ? Math.min(1, stroke.t / RAKE_STROKE.time) : null);
+  } else rakeView.update(false);
+  world.gardenGate?.setSign(zoneUnlocked(economy.progress, 'garden') ? ['Сад', 'F — войти'] : ['Сад', 'откроется после', 'уборки двора']);
   ground.update(now);
 
   // крышка контейнера и указатель
@@ -746,6 +908,12 @@ if (DEBUG) {
     slowmo(k) { timeScale = k; },
     advance(sec) { now += sec; }, // при slowmo(0): шаг времени для съёмки анимаций по кадрам
     mouseState() { return { held: mouseHeld, requested: pickRequested }; },
+    selectTool(t) { selectTool(t); return tool; },
+    buy(key) { buy(key); return economy.progress; },
+    rakeOnce() { if (tool !== 'rake') return null; stroke = null; pickRequested = true; updateRake(0); return economy.sold; },
+    gate(k) { const g = level.gates[k]; return gateBlock(g) ?? (useGate(g), 'ok'); },
+    level() { return level.id; },
+    rakeSpan() { return rakeSpan; },
   };
 }
 ui.show('hud', true);

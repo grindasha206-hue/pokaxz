@@ -1,8 +1,8 @@
 // Интерфейс поверх сцены: HUD, подсказки, магазин-блокнот, пауза и настройки.
 
-import { UPGRADES, BRANCHES, LOCKED_TOOLS, formatMoney, formatGain, plural } from './config.js';
+import { UPGRADES, BRANCHES, LOCKED_TOOLS, RAKE, RAKE_BRANCHES, formatMoney, formatGain, plural } from './config.js';
 import { level } from './layout.js';
-import { nextLevel } from './economy.js';
+import { nextLevel, ALL_INLETS } from './economy.js';
 
 const $ = (id) => document.getElementById(id);
 const RING_LEN = 40.84; // длина окружности кольца у точки (r = 6.5)
@@ -56,7 +56,7 @@ export class UI {
     this.set('zone', `${pct}|${remaining}`, () => {
       this.el.zoneBar.style.width = `${ratio * 100}%`;
       this.el.zoneValue.textContent = remaining === 0 ? '100 %' : `${Math.min(pct, 99)} %`;
-      this.el.zoneLeft.textContent = remaining === 0 ? 'двор чист!'
+      this.el.zoneLeft.textContent = remaining === 0 ? 'чисто!'
         : remaining <= 30 ? `осталось ${remaining} ${plural(remaining, 'лист', 'листа', 'листьев')}` : '';
     });
   }
@@ -101,31 +101,37 @@ export class UI {
 
   show(name, on = true) { this.el[name].hidden = !on; }
 
+  /** Слоты инструментов: грабли появляются, когда куплены. */
+  tools(active, rakeOwned) {
+    this.set('tools', `${active}|${rakeOwned}`, () => {
+      document.querySelector('#tools [data-tool="rake"]').hidden = !rakeOwned;
+      for (const el of document.querySelectorAll('#tools .slot')) el.classList.toggle('active', el.dataset.tool === active);
+    });
+  }
+
   renderShop(economy, onBuy) {
     const p = economy.progress;
     this.el.shopCoins.textContent = formatMoney(p.money);
     const rows = this.el.shopRows;
     rows.textContent = '';
-    for (const b of BRANCHES) {
-      const u = UPGRADES[b], next = nextLevel(p, b), lvl = p.upgrades[b];
+    // строка блокнота: название с точками уровней, значения «сейчас → после», кнопка и «не хватает»
+    const addRow = ({ title, hint, lvl, steps, next, now, after, maxText, key }) => {
       const row = document.createElement('div');
       row.className = 'upg' + (next && p.money >= next.price ? ' can' : '');
       const name = document.createElement('div');
       name.className = 'name';
-      name.innerHTML = `${u.title}<span class="levels">${'●'.repeat(lvl + 1)}${'○'.repeat(u.prices.length - lvl)}</span>`;
-      name.title = u.hint;
+      name.innerHTML = steps ? `${title}<span class="levels">${'●'.repeat(lvl + 1)}${'○'.repeat(steps - lvl)}</span>` : title;
+      name.title = hint;
       const vals = document.createElement('div');
       vals.className = 'vals';
-      if (next) vals.innerHTML = `<span class="now">${u.unit(next.current)}</span><span class="arrow">→</span><span class="next">${u.unit(next.value)}</span>`;
-      else vals.innerHTML = `<span class="next">${u.unit(u.values[lvl])}</span> — лучше уже некуда`;
+      vals.innerHTML = next ? (now ? `<span class="now">${now}</span><span class="arrow">→</span>` : '') + `<span class="next">${after}</span>` : maxText;
       const buy = document.createElement('div');
       buy.className = 'buy';
       const btn = document.createElement('button');
-      if (!next) { btn.textContent = 'максимум'; btn.disabled = true; }
-      else {
+      if (!next) { btn.textContent = steps ? 'максимум' : 'куплено'; btn.disabled = true; } else {
         btn.textContent = `купить · ${formatMoney(next.price)}`;
         btn.disabled = p.money < next.price;
-        btn.addEventListener('click', () => onBuy(b, btn));
+        btn.addEventListener('click', () => onBuy(key, btn));
       }
       buy.append(btn);
       if (next && p.money < next.price) {
@@ -136,7 +142,41 @@ export class UI {
         buy.append(lack);
       }
       row.append(name, buy, vals);
-      rows.append(row);
+      return row;
+    };
+    for (const b of BRANCHES) {
+      const u = UPGRADES[b], next = nextLevel(p, b), lvl = p.upgrades[b];
+      rows.append(addRow({
+        title: u.title, hint: u.hint, lvl, steps: u.prices.length, next, key: b,
+        now: next && u.unit(next.current), after: next && u.unit(next.value),
+        maxText: `<span class="next">${u.unit(u.values[lvl])}</span> — лучше уже некуда`,
+      }));
+    }
+    // грабли: покупка, затем три ветки улучшений
+    const rk = document.getElementById('rake-rows');
+    rk.textContent = '';
+    if (!p.tools.rake) {
+      rk.append(addRow({ title: RAKE.title, hint: RAKE.info, next: economy.offer('rake'), key: 'rake', after: RAKE.info, maxText: '' }));
+    } else {
+      for (const b of RAKE_BRANCHES) {
+        const u = RAKE.branches[b], lvl = p.tools.rake[b], next = economy.offer(`rake:${b}`);
+        rk.append(addRow({
+          title: u.title, hint: u.hint, lvl, steps: u.prices.length, next, key: `rake:${b}`,
+          now: next && u.unit(next.current, lvl), after: next && u.unit(next.value, lvl + 1),
+          maxText: `<span class="next">${u.unit(u.values[lvl], lvl)}</span> — лучше уже некуда`,
+        }));
+      }
+    }
+    // приёмники: бесплатный работает сразу, платные покупаются после граблей
+    for (const n of ALL_INLETS) {
+      const own = n.price === 0 || p.inlets.includes(n.id);
+      const next = own ? null : economy.offer(`inlet:${n.id}`);
+      const row = addRow({
+        title: n.name, hint: 'листья, протащенные граблями над решёткой, продаются сразу', next, key: `inlet:${n.id}`,
+        after: 'продаёт листья без мешка', maxText: own ? 'работает' : '<span class="dim">сначала грабли</span>',
+      });
+      if (!own && !next) row.querySelector('button').textContent = formatMoney(n.price);
+      rk.append(row);
     }
     // инструменты из таблицы, которых ещё нет: цены видны, купить нельзя
     const locked = document.getElementById('locked-tools');

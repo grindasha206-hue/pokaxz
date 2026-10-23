@@ -6,11 +6,11 @@
 //   • доход — по экономике игры: $0,004 за лист, +25 % за каждый бонус зоны (на 50 % уборки);
 //   • когда хватает денег на каждую покупку — по ценам из config.js при сборе по порядку зон;
 //   • скорость ручного сбора — прогоном сбора на реальной раскладке листьев (как economy-sim).
-// Что пока оценка (инструментов ещё нет в игре): скорость граблей и воздуходувки.
-// Их модели — в ASSUME ниже; это допущения до игрового теста.
+// Скорость граблей — замер ботом (tools/rake-sim.mjs); воздуходувки ещё нет — её скорость пока цель.
+// Обе — в ASSUME ниже; игровой тест с человеком их уточнит.
 
 import { readFileSync } from 'node:fs';
-import { PLAYER, UPGRADES, BRANCHES, LOCKED_TOOLS, LEAF_VALUE, LEAF_BONUS, usd, formatMoney } from '../src/config.js';
+import { PLAYER, UPGRADES, BRANCHES, LOCKED_TOOLS, RAKE, LEAF_VALUE, LEAF_BONUS, usd, formatMoney } from '../src/config.js';
 import { createGame } from '../src/game.js';
 import { setLevel, level, YARD } from '../src/layout.js';
 import { ON_GROUND } from '../src/leaves.js';
@@ -49,7 +49,9 @@ for (const z of ZONES) z.area = zoneArea(z);
 // Ориентир — рука на максимуме с походами к контейнеру. Грабли и воздуходувка сдают листья
 // в приёмники, без мешка. Это требования к будущей настройке инструментов, не замер.
 const ASSUME = {
-  rake: [1.0, 2.0],    // ×руки: без улучшений / все улучшения граблей
+  // грабли — замер ботом на коде игры (tools/rake-sim.mjs, сад, оба приёмника): 16,1 и 34,7 лист/с
+  // против 17,0 лист/с у руки на максимуме в том же саду
+  rake: [0.95, 2.0],   // ×руки: без улучшений / все улучшения граблей
   blower: [2.0, 4.0],  // ×руки: без улучшений / все улучшения воздуходувки
   handBeforeMax: 0.45, // рука до полной прокачки в новых зонах — грубо (в зоне 1 — точный прогон)
 };
@@ -127,10 +129,10 @@ function handMaxRate(z) {
 // ── покупки по порядку ──────────────────────────────────────
 const plan = [];
 for (const b of ['grab', 'speed', 'bag']) UPGRADES[b].prices.forEach((p, k) => plan.push({ tool: 'hand', what: `${UPGRADES[b].title} ${k + 1}`, price: p }));
-const [RAKE, BLOWER] = LOCKED_TOOLS;
+const [BLOWER] = LOCKED_TOOLS;
 const rakePlan = [{ tool: 'rake', what: 'Грабли', price: RAKE.price }];
 const blowPlan = [{ tool: 'blower', what: 'Воздуходувка', price: BLOWER.price }];
-for (const u of RAKE.upgrades) u.prices.forEach((p, k) => rakePlan.push({ tool: 'rake', what: `${u.title} ${k + 1}`, price: p }));
+for (const u of Object.values(RAKE.branches)) u.prices.forEach((p, k) => rakePlan.push({ tool: 'rake', what: `${u.title} ${k + 1}`, price: p }));
 for (const u of BLOWER.upgrades) u.prices.forEach((p, k) => blowPlan.push({ tool: 'blower', what: `${u.title} ${k + 1}`, price: p }));
 const sum = (a) => a.reduce((s, x) => s + x.price, 0);
 const inletTotal = ZONES.reduce((s, z) => s + z.inlets.reduce((x, [, p]) => x + usd(p), 0), 0);

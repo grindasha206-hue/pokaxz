@@ -153,6 +153,8 @@ export class LeafView {
     this.now = 0;
     this.flying = [];
     this.flyingIds = new Set();
+    this.slides = new Map();                     // листья, которые тянут грабли: откуда и когда
+    this.sinking = [];                           // листья, проваливающиеся в приёмник
     this.highlighted = new Set();
     this.raised = -1;
     this.wobbleId = -1;
@@ -198,7 +200,14 @@ export class LeafView {
       const fl = f.flat[i];
       tmpE.set(f.tiltX[i] * fl + w * 0.1, f.yaw[i] + extraYaw + w * 0.04, f.tiltZ[i] * fl + w * 0.07);
       tmpQ.setFromEuler(tmpE);
-      tmpP.set(f.x[i], surfaceHeight(f.x[i], f.z[i]) + this.shown[i] + st * 0.004 + extraLift, f.z[i]);
+      let x = f.x[i], z = f.z[i];
+      const sl = this.slides.get(i);
+      if (sl) {
+        // лист едет за граблями: от старого места к новому с той же скоростью, что и голова
+        const t = Math.min(1, Math.max(0, (this.now - sl.t0) / sl.dur)), k = 1 - t * t * (3 - 2 * t);
+        x += (sl.fx - x) * k; z += (sl.fz - z) * k;
+      }
+      tmpP.set(x, surfaceHeight(x, z) + this.shown[i] + st * 0.004 + extraLift, z);
       tmpM.compose(tmpP, tmpQ, tmpS.set(s, s, s));
       this.mesh.setMatrixAt(i, tmpM);
     }
@@ -218,7 +227,7 @@ export class LeafView {
   coverOf(i) {
     const f = this.field;
     let n = 0;
-    for (const j of f.neighbours(i, this.tmpN)) if (j > i && f.state[j] === ON_GROUND) n++;
+    for (const j of f.neighbours(i, this.tmpN)) if (f.order[j] > f.order[i] && f.state[j] === ON_GROUND) n++;
     return n;
   }
 
@@ -286,6 +295,37 @@ export class LeafView {
     if (ids.includes(this.raised)) this.raised = -1;
   }
 
+  /**
+   * Грабли сдвинули листья: moved — [{i, fx, fz}] (откуда), новые места уже в поле.
+   * Листья доезжают за dur секунд; высота и затенение кучи пересчитываются по changed.
+   */
+  slide(moved, changed, now, dur) {
+    for (const { i, fx, fz } of moved) this.slides.set(i, { fx, fz, t0: now, dur });
+    this.restack(changed);
+  }
+
+  /** Пересчёт высоты (плавно) и затенения листьев после перестройки кучи. */
+  restack(ids) {
+    for (const i of ids) {
+      this.falling.add(i);
+      const c = Math.min(255, this.coverOf(i));
+      if (c !== this.cover[i]) { this.cover[i] = c; this.writeColor(i, this.highlighted.has(i) ? 1.22 : 1); }
+    }
+  }
+
+  /** Листья проваливаются в приёмник (они уже проданы): доезжают до решётки и исчезают. */
+  sink(from, to, now, dur) {
+    const f = this.field;
+    from.forEach(({ i, fx, fz }, k) => {
+      this.flyingIds.add(i);
+      this.falling.delete(i);
+      this.sinking.push({
+        i, fx, fz, tx: to.x + (Math.random() - 0.5) * to.r, tz: to.z + (Math.random() - 0.5) * to.r,
+        t0: now + Math.min(k, 40) * 0.004, dur, y: this.shown[i], yaw: f.yaw[i], s: this.leafScale(i),
+      });
+    });
+  }
+
   /** Короткий поток листьев в контейнер при сдаче. */
   depositBurst(from, to, n, now) {
     const count = Math.min(32, Math.max(4, Math.ceil(n * 0.6)));
@@ -304,7 +344,7 @@ export class LeafView {
   settle(ids, removed = []) {
     for (const i of ids) this.falling.add(i);
     const f = this.field, near = new Set();
-    for (const r of removed) for (const j of f.neighbours(r, this.tmpN)) if (j < r && f.state[j] === ON_GROUND) near.add(j);
+    for (const r of removed) for (const j of f.neighbours(r, this.tmpN)) if (f.order[j] < f.order[r] && f.state[j] === ON_GROUND) near.add(j);
     for (const j of near) {
       const c = this.coverOf(j);
       if (c !== this.cover[j]) { this.cover[j] = c; this.writeColor(j, this.highlighted.has(j) ? 1.22 : 1); }
@@ -346,6 +386,27 @@ export class LeafView {
       this.shown[i] = Math.abs(d) <= step ? target : this.shown[i] + Math.sign(d) * step;
       if (this.shown[i] === target) { this.falling.delete(i); this.writeColor(i, this.highlighted.has(i) ? 1.22 : 1); }
       if (i !== this.wobbleId) this.writeMatrix(i, i === this.raised ? 0.006 : 0);
+    }
+    for (const [i, sl] of this.slides) {
+      if (now - sl.t0 >= sl.dur) this.slides.delete(i);
+      if (i !== this.wobbleId) this.writeMatrix(i, i === this.raised ? 0.006 : 0);
+    }
+    if (this.sinking.length) {
+      this.sinking = this.sinking.filter((s) => {
+        const t = Math.max(0, (now - s.t0) / s.dur);
+        if (t >= 1) { this.mesh.setMatrixAt(s.i, ZERO); this.flyingIds.delete(s.i); this.matrixDirty = true; return false; }
+        const e = t * t * (3 - 2 * t);
+        const x = s.fx + (s.tx - s.fx) * e, z = s.fz + (s.tz - s.fz) * e;
+        // последняя треть — лист уходит под решётку
+        const down = t > 0.66 ? (t - 0.66) / 0.34 : 0;
+        tmpP.set(x, surfaceHeight(x, z) + s.y - down * 0.08, z);
+        tmpE.set(0, s.yaw + t * 0.6, 0); tmpQ.setFromEuler(tmpE);
+        const sc = s.s * (1 - 0.6 * down);
+        tmpM.compose(tmpP, tmpQ, tmpS.set(sc, sc, sc));
+        this.mesh.setMatrixAt(s.i, tmpM);
+        this.matrixDirty = true;
+        return true;
+      });
     }
     // полёт к камере: подъём, кувырок и плавный перелёт к точке перед глазами
     if (this.flying.length) {
