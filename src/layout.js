@@ -493,8 +493,8 @@ export const PARK = (() => {
 
 // ── зона 6: аллея — длинная дорожка между двумя рядами лип, южнее площадки и сквера ──
 // Последняя зона: здесь докупается воздуходувка, после неё — уборка в удовольствие.
-// Сток в западном конце аллеи — бесплатный (в таблице Leaf it Alone для неё приёмника нет:
-// без него 18 тыс. листьев пришлось бы носить мешками за 20 м).
+// Стоки в обоих концах аллеи — бесплатные (в таблице Leaf it Alone для неё приёмников нет:
+// без них 18 тыс. листьев пришлось бы носить мешками за 20 м).
 export const AZ = { id: 'alley', name: 'Аллея', leafCount: 18000, minX: ZONE.maxX, maxX: PZ.maxX, minZ: KZ.maxZ, maxZ: 23.0 };
 export const ALLEY = (() => {
   const container = { x: 23.3, z: AZ.minZ + 0.62, w: 1.3, d: 1.0, h: 1.05, rotY: 0 };
@@ -505,7 +505,10 @@ export const ALLEY = (() => {
   ];
   const benches = [{ x0: 13.4, x1: 14.6, z0: 22.35, z1: 22.85, h: 0.9 }, { x0: 22.4, x1: 23.6, z0: 22.35, z1: 22.85, h: 0.9 }];
   const lamps = [[11.0, 21.3], [17.0, 19.5], [23.0, 21.3], [29.0, 19.5]];
-  const inlets = [{ id: 'alley-a', name: 'Сток в конце аллеи', x: 8.75, z: 20.4, r: 0.42, price: usd(0) }];
+  const inlets = [
+    { id: 'alley-a', name: 'Сток в западном конце аллеи', x: 8.75, z: 20.4, r: 0.42, price: usd(0) },
+    { id: 'alley-b', name: 'Сток в восточном конце аллеи', x: 29.25, z: 20.4, r: 0.42, price: usd(0) },
+  ];
   const obstacles = [
     box('fence-w', AZ.minX - T, AZ.minX + T, AZ.minZ, AZ.maxZ, FENCE_H),
     box('fence-n', AZ.minX, AZ.maxX + T, AZ.minZ - T, AZ.minZ + T, FENCE_H),

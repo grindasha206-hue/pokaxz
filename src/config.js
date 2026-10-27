@@ -100,7 +100,7 @@ export const BLOWER = {
 export const BLOWER_BRANCHES = Object.keys(BLOWER.branches);
 // Струя: начинается в start м перед игроком; дальность range0 + rangeK·(мощность − 1500)/900;
 // скорость листа у сопла speed·мощность/1500 м/с, к концу струи падает до нуля. Логика — тактами tick с.
-export const BLOWER_STREAM = { start: 0.35, range0: 1.7, rangeK: 1.1, spreadK: 0.14, speed: 3.0, tick: 0.05, cap: 700 };
+export const BLOWER_STREAM = { start: 0.35, range0: 1.7, rangeK: 1.1, spreadK: 0.14, speed: 4.5, tick: 0.05, cap: 700 };
 
 /** Инструменты, которые покупаются: грабли и воздуходувка (ключи в progress.tools). */
 export const TOOLS = { rake: RAKE, blower: BLOWER };

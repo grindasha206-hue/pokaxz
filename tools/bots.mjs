@@ -24,20 +24,30 @@ export const RAKE_MAX = B(RAKE), BLOWER_MAX = B(BLOWER);
 export const RAKE_NONE = { handle: 0, sweep: 0, sticky: 0 }, BLOWER_NONE = { width: 0, power: 0, accuracy: 0 };
 
 /**
- * Прогон уборки зоны. phases — по порядку: 'blower', 'rake', 'hand'.
+ * Прогон уборки зоны. phases — по порядку: 'blower', 'rake', 'hand' — каждый этап до конца;
+ * или 'auto' (прохождение игры): progress — общий прогресс (меняется), shop(e) вызывается после каждой
+ * проводки и сдачи и возвращает true, если куплен инструмент или приёмник; бот всегда берёт лучший
+ * из имеющихся инструментов, а рукой добирает то, что инструментами не загнать.
  * inlets: 'all' — все приёмники зоны, 'first' — только первый (самый дешёвый), 'none'.
  */
-export function simulate({ zone, phases = ['rake', 'hand'], rake = RAKE_NONE, blower = BLOWER_NONE, hand = 'max', inlets = 'all', seed = 1 }) {
+export function simulate({ zone, phases = ['rake', 'hand'], rake = RAKE_NONE, blower = BLOWER_NONE, hand = 'max', inlets = 'all', seed = 1, progress = null, shop = null }) {
   setLevel(zone);
   const g = createGame();
   const { field: f, economy: e } = g;
-  const max = (b) => UPGRADES[b].prices.length;
-  e.progress.upgrades = hand === 'max' ? { grab: max('grab'), speed: max('speed'), bag: max('bag') } : { grab: 0, speed: 0, bag: 0 };
-  e.progress.tools.rake = { ...rake };
-  e.progress.tools.blower = { ...blower };
-  e.progress.inlets = inlets === 'all' ? (level.inlets ?? []).map((n) => n.id) : [];
-  const ins = inlets === 'none' ? [] : inlets === 'first' ? (level.inlets ?? []).slice(0, 1) : activeInlets(e.progress);
-  const flow = ins.length ? buildFlow(ins) : null;
+  if (progress) e.progress = progress;
+  else {
+    const max = (b) => UPGRADES[b].prices.length;
+    e.progress.upgrades = hand === 'max' ? { grab: max('grab'), speed: max('speed'), bag: max('bag') } : { grab: 0, speed: 0, bag: 0 };
+    e.progress.tools.rake = { ...rake };
+    e.progress.tools.blower = { ...blower };
+    e.progress.inlets = inlets === 'all' ? (level.inlets ?? []).map((n) => n.id) : [];
+  }
+  let ins = [], flow = null;
+  const refreshInlets = () => {
+    ins = inlets === 'none' ? [] : inlets === 'first' && !progress ? (level.inlets ?? []).slice(0, 1) : activeInlets(e.progress);
+    flow = ins.length ? buildFlow(ins) : null;
+  };
+  refreshInlets();
   const rng = mulberry32(seed);
   const p = { x: level.spawn.x, z: level.spawn.z, yaw: 0 };
   const out = { count: f.count, t: 0, phases: {} };
@@ -49,7 +59,12 @@ export function simulate({ zone, phases = ['rake', 'hand'], rake = RAKE_NONE, bl
     p.x += (x - p.x) * k; p.z += (z - p.z) * k;
     if (d > 1) spin = 0; // перешёл на новое место — кнопка воздуходувки отпущена
   };
-  const sell = (r) => { let n = 0; for (const a of r.absorbed) n += e.sellDirect(a.ids); return n; };
+  const sell = (r) => { let n = 0; for (const a of r.absorbed) n += e.sellDirect(a.ids); if (n) e.checkRewards(); return n; };
+  const buy = () => {
+    if (!shop || !shop(e)) return false;
+    refreshInlets();
+    return true;
+  };
   // направление к приёмнику и место, где встать (dist — от листа против направления), с обходом препятствий
   const stance = (i, dist, sign) => {
     let u = flow.dirAt(f.x[i], f.z[i]);
@@ -67,7 +82,8 @@ export function simulate({ zone, phases = ['rake', 'hand'], rake = RAKE_NONE, bl
   };
 
   const drives = {
-    rake(st, span) {
+    rake() {
+      const st = rakeStats(e.rake), span = strokeSpan(st, Infinity);
       return (i) => {
         let last = Infinity, stuck = 0;
         for (let k = 0; k < 60 && f.state[i] === ON_GROUND; k++) {
@@ -87,8 +103,9 @@ export function simulate({ zone, phases = ['rake', 'hand'], rake = RAKE_NONE, bl
         return f.state[i] !== ON_GROUND;
       };
     },
-    blower(st) {
-      const back = BLOWER_STREAM.start + st.range * 0.25; // вал держится перед игроком
+    blower() {
+      const st = blowerStats(e.blower);
+      const back = BLOWER_STREAM.start + 0.2; // лист — сразу перед соплом, вал впереди
       return (i) => {
         let last = Infinity, stuck = 0;
         for (let k = 0; k < 600 && f.state[i] === ON_GROUND; k++) {
@@ -111,12 +128,18 @@ export function simulate({ zone, phases = ['rake', 'hand'], rake = RAKE_NONE, bl
     },
   };
 
-  for (const phase of phases) {
+  // этап: рука (до конца) или инструмент (пока есть что загнать). Возвращает 'done' | 'exhausted' | 'bought'.
+  const run = (phase) => {
     const t0 = t;
-    out.cur = out.phases[phase] = { actions: 0, sold: 0, time: 0, trips: 0, hand: 0 };
+    out.cur = out.phases[phase] ??= { actions: 0, sold: 0, time: 0, trips: 0, hand: 0 };
+    let reason = 'done';
     if (phase === 'hand') {
       while (e.remaining > 0 || e.inBag > 0) {
-        if (e.free === 0 || e.remaining === 0) { walkTo(level.container.x, level.container.z, 1.4); e.deposit(); out.cur.trips++; continue; }
+        if (e.free === 0 || e.remaining === 0) {
+          walkTo(level.container.x, level.container.z, 1.4); e.deposit(); out.cur.trips++;
+          if (buy() && ins.length && (e.rake || e.blower)) { reason = 'bought'; break; }
+          continue;
+        }
         let best = -1, bd = Infinity;
         for (let i = 0; i < f.count; i++) {
           if (f.state[i] !== ON_GROUND) continue;
@@ -126,12 +149,12 @@ export function simulate({ zone, phases = ['rake', 'hand'], rake = RAKE_NONE, bl
         walkTo(f.x[best], f.z[best], REACH_H);
         t += AIM + e.pickTime;
         out.cur.hand += e.collect(f.gatherAround(best, Math.min(e.grab, e.free))).length;
+        e.checkRewards();
       }
-    } else if (flow) {
-      const drive = phase === 'rake'
-        ? drives.rake(rakeStats(rake), strokeSpan(rakeStats(rake), Infinity))
-        : drives.blower(blowerStats(blower));
+    } else if (flow && e.progress.tools[phase]) {
+      let drive = drives[phase]();
       const skip = new Set();
+      reason = 'exhausted';
       for (let guard = 0; e.remaining > 0 && guard < 100000; guard++) {
         // самый дальний лист по пути к приёмнику, с поправкой на то, как далеко до него идти
         let best = -1, bs = -Infinity;
@@ -143,11 +166,34 @@ export function simulate({ zone, phases = ['rake', 'hand'], rake = RAKE_NONE, bl
           if (sc > bs) { bs = sc; best = i; }
         }
         if (best < 0) break;
-        if (!drive(best)) skip.add(best);
+        const tb = t, ok = drive(best);
+        if (process.env.BOTLOG && t - tb > 5) console.log(`${phase} лист ${best} (${f.x[best].toFixed(1)}, ${f.z[best].toFixed(1)}) ${ok ? 'загнан' : 'брошен'} за ${(t - tb).toFixed(1)} с, продано ${out.cur.sold}`);
+        // не вышло — откладываем всю кучку вокруг листа, а не перебираем её по листу
+        if (!ok) for (const j of f.leavesNear(f.x[best], f.z[best], 0.3)) skip.add(j);
+        if (!ok) skip.add(best);
+        if (shop) {
+          const before = JSON.stringify(e.progress.tools) + e.progress.inlets.join();
+          if (buy()) {
+            if (JSON.stringify(e.progress.tools) + e.progress.inlets.join() !== before) { reason = 'bought'; break; }
+            drive = drives[phase](); // ступень улучшения — новые характеристики
+          }
+        }
       }
+      if (e.remaining === 0) reason = 'done';
+    } else reason = 'exhausted';
+    out.cur.time += t - t0;
+    return reason;
+  };
+  if (phases === 'auto') {
+    buy();
+    const exhausted = new Set();
+    for (let guard = 0; (e.remaining > 0 || e.inBag > 0) && guard < 1000; guard++) {
+      const phase = ['blower', 'rake'].find((ph) => e.progress.tools[ph] && ins.length && !exhausted.has(ph)) ?? 'hand';
+      const r = run(phase);
+      if (r === 'exhausted') exhausted.add(phase);
+      if (r === 'bought') exhausted.clear();
     }
-    out.cur.time = t - t0;
-  }
+  } else for (const phase of phases) run(phase);
   delete out.cur;
   out.t = t;
   out.leafValue = e.leafValue;

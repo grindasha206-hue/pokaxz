@@ -403,8 +403,8 @@ test('все шесть зон: цепочка ворот, 98 400 листьев
     assert.equal(zoneUnlocked({ bonuses: [`${prev}-100`] }, id), true);
     assert.equal(zoneUnlocked({ bonuses: [] }, id), false);
   }
-  // цены приёмников — по таблице; сток аллеи — бесплатный (в таблице для неё приёмника нет)
+  // цены приёмников — по таблице; стоки аллеи — бесплатные (в таблице для неё приёмников нет)
   const prices = Object.fromEntries(ALL_INLETS.map((n) => [n.id, n.price / 10000]));
-  assert.deepEqual(prices, { 'garden-a': 0, 'garden-b': 3, 'court-a': 3, 'court-b': 6, 'pool-a': 10, 'pool-b': 15, 'park-a': 20, 'park-b': 25, 'alley-a': 0 });
+  assert.deepEqual(prices, { 'garden-a': 0, 'garden-b': 3, 'court-a': 3, 'court-b': 6, 'pool-a': 10, 'pool-b': 15, 'park-a': 20, 'park-b': 25, 'alley-a': 0, 'alley-b': 0 });
   for (const id of ZONE_ORDER) assert.ok(LEVELS[id].container, `${id}: контейнер`);
 });
