@@ -104,7 +104,8 @@ if (FRAGMENT_MODE) {
     scene.add(ground.mesh);
   } else ground = { update() {} };
 }
-const leaves = new LeafView(scene, field, leafTextures, { size: level.leafSize });
+// в зонах больше 20 тыс. листьев лист — сетка 3 × 3 вместо 4 × 4: почти вдвое меньше треугольников
+const leaves = new LeafView(scene, field, leafTextures, { size: level.leafSize, segments: field.count > 20000 ? 3 : 4 });
 const rakeView = new RakeView(scene);
 const blowerView = new BlowerView(scene);
 // приёмники сада видны и из двора: открыта решётка или крышка
@@ -454,7 +455,7 @@ function zoneDoneText() {
 }
 
 // таблички на воротах: куда ведут и открыты ли (зон, которых ещё нет, — «скоро»)
-const SOON = { park: ['Сквер', 'с лабиринтом', '— скоро'] };
+const SOON = {};
 function updateGateSigns() {
   for (const [key, set] of Object.entries(world.gateSigns ?? {})) {
     const [from, to] = key.split('>'), L = LEVELS[to];

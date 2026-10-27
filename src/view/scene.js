@@ -7,6 +7,7 @@ import { CONTAINER, SHOP, TREE, PORCH, PORCH_STEP, GARDEN_GATE, T as FENCE_T, FE
 import { buildGarden } from './garden.js';
 import { buildCourt } from './court.js';
 import { buildPool } from './pool.js';
+import { buildPark, buildAlley } from './park.js';
 import { mulberry32 } from '../leaves.js';
 import { grassTexture, plasterTexture, woodTexture, roofTexture, signTexture, boardTexture, barkTexture } from './textures.js';
 import { placeModel, worldUV } from './yardAssets.js';
@@ -77,14 +78,18 @@ export function buildWorld(scene, assets = { mats: {}, models: {} }, lvl = level
   const garden = buildGarden(scene, MAT, M);
   const court = buildCourt(scene, MAT, M);
   const pool = buildPool(scene, MAT, M);
-  refs.container = { yard: yardContainer, garden: garden.container, court: court.container, pool: pool.container }[lvl.id] ?? yardContainer;
-  refs.inlets = new Map([...garden.inlets, ...court.inlets, ...pool.inlets]);
+  const park = buildPark(scene, MAT, M);
+  const alley = buildAlley(scene, MAT, M);
+  refs.container = { yard: yardContainer, garden: garden.container, court: court.container, pool: pool.container,
+    park: park.container, alley: alley.container }[lvl.id] ?? yardContainer;
+  refs.inlets = new Map([...garden.inlets, ...court.inlets, ...pool.inlets, ...park.inlets, ...alley.inlets]);
   // таблички ворот: «откуда>куда» — с той стороны, откуда к ним подходят
   refs.gateSigns = {
     'yard>garden': refs.gardenGate.setSign, 'garden>yard': refs.gardenGate.setBackSign,
     'garden>court': garden.courtGate.setSign, 'court>garden': garden.courtGate.setBackSign,
     'court>pool': court.poolGate.setSign, 'pool>court': court.poolGate.setBackSign,
-    'pool>park': pool.parkGate.setSign,
+    'pool>park': pool.parkGate.setSign, 'park>pool': pool.parkGate.setBackSign,
+    'park>alley': park.alleyGate.setSign, 'alley>park': park.alleyGate.setBackSign,
   };
   buildSurroundings(scene, MAT, M);
   return refs;
@@ -589,7 +594,7 @@ function buildSurroundings(scene, MAT, M = {}) {
   };
   house(-15.5, -3, 8, 7, 5.2, Math.PI / 2, '#e7dcc8', '#9a6a55');   // соседи на западе
   house(-4, 17.5, 9, 7, 5.6, Math.PI, '#d9cbb3', '#7f5a4a');        // через улицу
-  house(9, 18.5, 7, 6, 4.8, Math.PI, '#ece3d2', '#8c4a3a');
+  house(14, 29, 7, 6, 4.8, Math.PI, '#ece3d2', '#8c4a3a');         // за аллеей
   house(4, -24, 9, 7, 6.2, 0, '#e2d6c0', '#6d5a4e');               // за домом
   if (M.tree1 && M.tree3) {
     // за забором — ещё деревья: закрывают горизонт, но это не лес

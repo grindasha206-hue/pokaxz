@@ -390,3 +390,21 @@ test('терраса с бассейном открывается наградо
     for (let i = 0; i < f.count; i++) assert.ok(!(f.x[i] > P.x0 && f.x[i] < P.x1 && f.z[i] > P.z0 && f.z[i] < P.z1), `лист ${i} в воде`);
   } finally { setLevel('yard'); }
 });
+
+test('все шесть зон: цепочка ворот, 98 400 листьев, у каждой зоны свой контейнер и приёмники', () => {
+  assert.deepEqual(ZONE_ORDER, ['yard', 'garden', 'court', 'pool', 'park', 'alley']);
+  assert.equal(ZONE_ORDER.reduce((s, z) => s + LEVELS[z].leafCount, 0), 98400);
+  for (let k = 1; k < ZONE_ORDER.length; k++) {
+    const prev = ZONE_ORDER[k - 1], id = ZONE_ORDER[k];
+    const fwd = LEVELS[prev].gates.find((g) => g.to === id), back = LEVELS[id].gates.find((g) => g.to === prev);
+    assert.equal(fwd?.requires, `${prev}-100`, `${prev} → ${id} открывается уборкой ${prev}`);
+    assert.ok(back && !back.requires, `${id} → ${prev} — свободно`);
+    assert.ok(ARRIVALS[`${prev}>${id}`] && ARRIVALS[`${id}>${prev}`]);
+    assert.equal(zoneUnlocked({ bonuses: [`${prev}-100`] }, id), true);
+    assert.equal(zoneUnlocked({ bonuses: [] }, id), false);
+  }
+  // цены приёмников — по таблице; сток аллеи — бесплатный (в таблице для неё приёмника нет)
+  const prices = Object.fromEntries(ALL_INLETS.map((n) => [n.id, n.price / 10000]));
+  assert.deepEqual(prices, { 'garden-a': 0, 'garden-b': 3, 'court-a': 3, 'court-b': 6, 'pool-a': 10, 'pool-b': 15, 'park-a': 20, 'park-b': 25, 'alley-a': 0 });
+  for (const id of ZONE_ORDER) assert.ok(LEVELS[id].container, `${id}: контейнер`);
+});

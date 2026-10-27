@@ -384,11 +384,12 @@ export const POOL = (() => {
     id: PZ.id, name: PZ.name, leafCount: PZ.leafCount, zone: PZ, signName: 'Терраса', genitive: 'террасы',
     rewards: [
       { id: 'pool-50', at: 0.5, leafBonus: 1, text: 'цена листа +25 %' },
-      { id: 'pool-100', at: 1, leafBonus: 0, text: 'сквер откроется в следующей версии' },
+      { id: 'pool-100', at: 1, leafBonus: 0, text: 'открыт сквер с лабиринтом — ворота в южном заборе' },
     ],
     gates: [
       { to: 'court', x: PZ.minX + 0.45, z: gate, requires: null },
-      { to: null, x: PARK_GATE.x, z: PZ.maxZ - 0.45, requires: 'pool-100', locked: 'Сквер с лабиринтом — в следующей версии' },
+      { to: 'park', x: PARK_GATE.x, z: PZ.maxZ - 0.45, requires: 'pool-100',
+        locked: 'Сквер откроется, когда терраса будет убрана полностью' },
     ],
     inset: 0,
     obstacles,
@@ -405,6 +406,153 @@ export const POOL = (() => {
   };
 })();
 
+// ── зона 5: сквер с лабиринтом, южнее террасы ───────────────
+// Живая изгородь-лабиринт (серпантин из четырёх коридоров), теплица с дорожкой, скамейки, фонари.
+// Приёмники: в середине лабиринта ($20) и у дорожки к теплице ($25).
+export const KZ = { id: 'park', name: 'Сквер с лабиринтом', leafCount: 24000, minX: CZ.maxX, maxX: PZ.maxX, minZ: PZ.maxZ, maxZ: 17.8 };
+export const ALLEY_GATE = { x: 21.25, x0: 20.5, x1: 22.0 };
+export const PARK = (() => {
+  const container = { x: 28.9, z: KZ.minZ + 0.72, w: 1.3, d: 1.0, h: 1.05, rotY: 0 };
+  const greenhouse = { x0: 25.5, x1: KZ.maxX - T, z0: 13.4, z1: KZ.maxZ - T, h: 2.6 };
+  const path = { x0: 26.85, x1: 27.75, z0: KZ.minZ, z1: greenhouse.z0 };          // дорожка к теплице
+  // лабиринт: стены живой изгороди (x0, x1, z0, z1), высота 1,15 м, коридоры 1,25 м
+  const M = { x0: 19.5, x1: 25.0, z0: 6.0, z1: 12.5, t: 0.3 };
+  const hedges = [
+    [M.x0, 21.0, M.z0, M.z0 + M.t], [22.3, M.x1, M.z0, M.z0 + M.t],             // север, вход 21,0–22,3
+    [M.x0, 23.0, M.z1 - M.t, M.z1], [24.3, M.x1, M.z1 - M.t, M.z1],             // юг, выход 23,0–24,3
+    [M.x0, M.x0 + M.t, M.z0, M.z1], [M.x1 - M.t, M.x1, M.z0, M.z1],             // запад, восток
+    [M.x0 + M.t, 23.45, 7.55, 7.85],                                              // серпантин
+    [21.05, M.x1 - M.t, 9.1, 9.4],
+    [M.x0 + M.t, 23.45, 10.65, 10.95],
+  ];
+  const benches = [{ x0: 28.6, x1: 29.1, z0: 7.6, z1: 9.4, h: 0.9 }, { x0: 18.9, x1: 19.4, z0: 13.6, z1: 15.4, h: 0.9 }];
+  const lamps = [[26.3, 6.4], [26.3, 11.0], [24.0, 15.2]];
+  const trees = [{ x: 20.2, z: 16.2, r: 0.34 }, { x: 28.6, z: 11.2, r: 0.3 }];
+  const bushes = [[18.6, 4.4, 0.42], [22.8, 14.1, 0.45], [19.0, 12.9, 0.4]];
+  const inlets = [
+    { id: 'park-a', name: 'Приёмник в лабиринте', x: 22.25, z: 10.02, r: 0.42, price: usd(20) },
+    { id: 'park-b', name: 'Приёмник у дорожки к теплице', x: 27.3, z: 11.6, r: 0.42, price: usd(25) },
+  ];
+  const obstacles = [
+    box('fence-w', KZ.minX - T, KZ.minX + T, KZ.minZ, KZ.maxZ, FENCE_H),
+    box('fence-n', KZ.minX, KZ.maxX + T, KZ.minZ - T, KZ.minZ + T, FENCE_H),
+    box('fence-e', KZ.maxX - T, KZ.maxX + T, KZ.minZ, KZ.maxZ, FENCE_H),
+    box('fence-s', KZ.minX, KZ.maxX + T, KZ.maxZ - T, KZ.maxZ + T, FENCE_H),
+    box('container', container.x - container.w / 2, container.x + container.w / 2, container.z - container.d / 2, container.z + container.d / 2, container.h),
+    box('greenhouse', greenhouse.x0, greenhouse.x1, greenhouse.z0, greenhouse.z1, greenhouse.h),
+    ...hedges.map(([x0, x1, z0, z1], k) => box(`hedge-${k}`, x0, x1, z0, z1, 1.15)),
+    ...benches.map((b, k) => box(`bench-${k}`, b.x0, b.x1, b.z0, b.z1, b.h)),
+    ...lamps.map(([x, z], k) => circle(`lamp-${k}`, x, z, 0.07, 2.6)),
+    ...trees.map((t, k) => circle(`tree-${k}`, t.x, t.z, t.r, 8)),
+    ...bushes.map(([x, z, r], k) => circle(`bush-${k}`, x, z, r, 1.0)),
+  ];
+  const onPath = (x, z) => x >= path.x0 && x <= path.x1 && z >= path.z0 && z <= path.z1;
+  const density = (x, z, noise, drift) => {
+    const toFence = Math.min(x - KZ.minX, KZ.maxX - x, KZ.maxZ - z, z - KZ.minZ);
+    // у изгороди лабиринта листья копятся с обеих сторон
+    let toHedge = Infinity;
+    for (const [x0, x1, z0, z1] of hedges) toHedge = Math.min(toHedge, Math.hypot(Math.max(x0 - x, 0, x - x1), Math.max(z0 - z, 0, z - z1)));
+    let d = 0.03;
+    d += 1.4 * Math.exp(-((toFence / 1.0) ** 2));
+    d += 1.3 * Math.exp(-((toHedge / 0.45) ** 2));
+    for (const t of trees) d += 2.4 * Math.exp(-((Math.hypot(x - t.x, z - t.z) / 2.4) ** 2));
+    for (const [cx, cz, r] of drift) d += 2.2 * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) / (r * r * 1.6));
+    d *= 0.5 + noise(x * 0.6, z * 0.6);
+    d = d ** 2;
+    if (onPath(x, z)) d *= 0.5;
+    for (const i of inlets) if (Math.hypot(x - i.x, z - i.z) < i.r + 0.45) d *= 0.05;
+    if (Math.hypot(x - container.x, z - container.z) < 1.4) d *= 0.3;
+    if (Math.hypot(x - PARK_GATE.x, z - KZ.minZ) < 1.2) d *= 0.3;
+    return d;
+  };
+  return {
+    id: KZ.id, name: KZ.name, leafCount: KZ.leafCount, zone: KZ, signName: 'Сквер', genitive: 'сквера',
+    rewards: [
+      { id: 'park-50', at: 0.5, leafBonus: 1, text: 'цена листа +25 %' },
+      { id: 'park-100', at: 1, leafBonus: 0, text: 'открыта аллея — ворота в южном заборе' },
+    ],
+    gates: [
+      { to: 'pool', x: PARK_GATE.x, z: KZ.minZ + 0.45, requires: null },
+      { to: 'alley', x: ALLEY_GATE.x, z: KZ.maxZ - 0.45, requires: 'park-100',
+        locked: 'Аллея откроется, когда сквер будет убран полностью' },
+    ],
+    inset: 0,
+    obstacles,
+    spawn: { x: PARK_GATE.x, z: KZ.minZ + 0.95, yaw: Math.PI },
+    container, shop: null, greenhouse, path, maze: M, hedges, benches, lamps, trees, bushes, inlets,
+    surface: () => 0,
+    onPath,
+    density,
+    maxDensity: 14,
+    drifts: 9,
+    starter: null,
+    leafMargin: 0.08,
+    leafSize: 1.12,
+  };
+})();
+
+// ── зона 6: аллея — длинная дорожка между двумя рядами лип, южнее площадки и сквера ──
+// Последняя зона: здесь докупается воздуходувка, после неё — уборка в удовольствие.
+// Сток в западном конце аллеи — бесплатный (в таблице Leaf it Alone для неё приёмника нет:
+// без него 18 тыс. листьев пришлось бы носить мешками за 20 м).
+export const AZ = { id: 'alley', name: 'Аллея', leafCount: 18000, minX: ZONE.maxX, maxX: PZ.maxX, minZ: KZ.maxZ, maxZ: 23.0 };
+export const ALLEY = (() => {
+  const container = { x: 23.3, z: AZ.minZ + 0.62, w: 1.3, d: 1.0, h: 1.05, rotY: 0 };
+  const path = { x0: AZ.minX, x1: AZ.maxX, z0: 19.85, z1: 20.95 };
+  const trees = [
+    ...[9.5, 12.5, 15.5, 24.5, 27.5].map((x) => ({ x, z: 18.65, r: 0.24 })),
+    ...[9.5, 12.5, 15.5, 18.5, 21.5, 24.5, 27.5].map((x) => ({ x, z: 22.2, r: 0.24 })),
+  ];
+  const benches = [{ x0: 13.4, x1: 14.6, z0: 22.35, z1: 22.85, h: 0.9 }, { x0: 22.4, x1: 23.6, z0: 22.35, z1: 22.85, h: 0.9 }];
+  const lamps = [[11.0, 21.3], [17.0, 19.5], [23.0, 21.3], [29.0, 19.5]];
+  const inlets = [{ id: 'alley-a', name: 'Сток в конце аллеи', x: 8.75, z: 20.4, r: 0.42, price: usd(0) }];
+  const obstacles = [
+    box('fence-w', AZ.minX - T, AZ.minX + T, AZ.minZ, AZ.maxZ, FENCE_H),
+    box('fence-n', AZ.minX, AZ.maxX + T, AZ.minZ - T, AZ.minZ + T, FENCE_H),
+    box('fence-e', AZ.maxX - T, AZ.maxX + T, AZ.minZ, AZ.maxZ, FENCE_H),
+    box('fence-s', AZ.minX, AZ.maxX + T, AZ.maxZ - T, AZ.maxZ + T, FENCE_H),
+    box('container', container.x - container.w / 2, container.x + container.w / 2, container.z - container.d / 2, container.z + container.d / 2, container.h),
+    ...trees.map((t, k) => circle(`tree-${k}`, t.x, t.z, t.r, 8)),
+    ...benches.map((b, k) => box(`bench-${k}`, b.x0, b.x1, b.z0, b.z1, b.h)),
+    ...lamps.map(([x, z], k) => circle(`lamp-${k}`, x, z, 0.07, 2.6)),
+  ];
+  const onPath = (x, z) => z >= path.z0 && z <= path.z1;
+  const density = (x, z, noise, drift) => {
+    const toFence = Math.min(x - AZ.minX, AZ.maxX - x, AZ.maxZ - z, z - AZ.minZ);
+    let d = 0.04;
+    d += 1.3 * Math.exp(-((toFence / 0.9) ** 2));
+    for (const t of trees) d += 1.6 * Math.exp(-((Math.hypot(x - t.x, z - t.z) / 1.6) ** 2));
+    for (const [cx, cz, r] of drift) d += 2.0 * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) / (r * r * 1.6));
+    d *= 0.5 + noise(x * 0.6, z * 0.6);
+    d = d ** 2;
+    if (onPath(x, z)) d *= 0.6;
+    for (const i of inlets) if (Math.hypot(x - i.x, z - i.z) < i.r + 0.45) d *= 0.05;
+    if (Math.hypot(x - container.x, z - container.z) < 1.3) d *= 0.3;
+    if (Math.hypot(x - ALLEY_GATE.x, z - AZ.minZ) < 1.2) d *= 0.3;
+    return d;
+  };
+  return {
+    id: AZ.id, name: AZ.name, leafCount: AZ.leafCount, zone: AZ, signName: 'Аллея', genitive: 'аллеи',
+    rewards: [
+      { id: 'alley-50', at: 0.5, leafBonus: 1, text: 'цена листа +25 %' },
+      { id: 'alley-100', at: 1, leafBonus: 0, text: 'весь участок убран — спасибо за уборку!' },
+    ],
+    gates: [{ to: 'park', x: ALLEY_GATE.x, z: AZ.minZ + 0.45, requires: null }],
+    inset: 0,
+    obstacles,
+    spawn: { x: ALLEY_GATE.x, z: AZ.minZ + 0.95, yaw: Math.PI },
+    container, shop: null, path, trees, benches, lamps, inlets,
+    surface: () => 0,
+    onPath,
+    density,
+    maxDensity: 14,
+    drifts: 8,
+    starter: null,
+    leafMargin: 0.08,
+    leafSize: 1.12,
+  };
+})();
+
 // где появляется игрок, входя в зону из другой (у ворот)
 export const ARRIVALS = {
   'yard>garden': GARDEN.spawn,
@@ -413,11 +561,15 @@ export const ARRIVALS = {
   'court>garden': { x: COURT_GATE.x, z: GZ.maxZ - 0.75, yaw: 0 },
   'court>pool': POOL.spawn,
   'pool>court': { x: CZ.maxX - 0.95, z: (POOL_GATE.z0 + POOL_GATE.z1) / 2, yaw: Math.PI / 2 },
+  'pool>park': PARK.spawn,
+  'park>pool': { x: PARK_GATE.x, z: PZ.maxZ - 0.95, yaw: 0 },
+  'park>alley': ALLEY.spawn,
+  'alley>park': { x: ALLEY_GATE.x, z: KZ.maxZ - 0.95, yaw: 0 },
 };
 
-export const LEVELS = { yard: YARD, garden: GARDEN, court: COURT, pool: POOL, fragment: FRAGMENT };
+export const LEVELS = { yard: YARD, garden: GARDEN, court: COURT, pool: POOL, park: PARK, alley: ALLEY, fragment: FRAGMENT };
 /** Зоны игры по порядку (фрагмент — отдельный режим проверки, не зона). */
-export const ZONE_ORDER = ['yard', 'garden', 'court', 'pool'];
+export const ZONE_ORDER = ['yard', 'garden', 'court', 'pool', 'park', 'alley'];
 
 export let level = YARD;
 export function setLevel(l) { level = typeof l === 'string' ? LEVELS[l] : l; }

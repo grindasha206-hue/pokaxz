@@ -38,8 +38,9 @@ const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const EYE_TARGET = new THREE.Vector3(0, -0.11, -0.32); // куда летит лист — чуть ниже центра взгляда
 
-function leafGeometry() {
-  const geo = new THREE.PlaneGeometry(1, 1, 4, 4); // 32 треугольника: изгибы плавные, а листьев тысячи
+function leafGeometry(seg = 4) {
+  // 4 × 4 — 32 треугольника: изгибы плавные, а листьев тысячи; в самых больших зонах — 3 × 3 (18)
+  const geo = new THREE.PlaneGeometry(1, 1, seg, seg);
   geo.rotateX(-Math.PI / 2); // плоскость XZ, нормаль +Y; после поворота −Z — к кончику листа
   const pos = geo.attributes.position, uv = geo.attributes.uv;
   for (let i = 0; i < pos.count; i++) {
@@ -105,12 +106,12 @@ function leafMaterial({ map, alphaMap }) {
 }
 
 export class LeafView {
-  constructor(scene, field, textures, { size = 1 } = {}) {
+  constructor(scene, field, textures, { size = 1, segments = 4 } = {}) {
     this.field = field;
     this.size = LEAF_BASE * size;
     this.material = leafMaterial(textures);
     const n = field.count;
-    const geo = leafGeometry();
+    const geo = leafGeometry(segments);
     addInstanceAttributes(geo, n);
     this.mesh = new THREE.InstancedMesh(geo, this.material, n);
     this.mesh.receiveShadow = true;
