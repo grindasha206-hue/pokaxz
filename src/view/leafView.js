@@ -313,6 +313,12 @@ export class LeafView {
     }
   }
 
+  /** Лист гонит струя: покачивается и поворачивается на лету (k — сила 0…1). */
+  flutter(i, k) {
+    const v = 0.35 + 0.65 * k;
+    if (v > this.stir[i]) { this.stir[i] = v; this.stirring.add(i); }
+  }
+
   /** Листья проваливаются в приёмник (они уже проданы): доезжают до решётки и исчезают. */
   sink(from, to, now, dur) {
     const f = this.field;

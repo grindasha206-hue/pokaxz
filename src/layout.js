@@ -306,12 +306,12 @@ export const COURT = (() => {
     id: CZ.id, name: CZ.name, leafCount: CZ.leafCount, zone: CZ, signName: 'Площадка', genitive: 'площадки',
     rewards: [
       { id: 'court-50', at: 0.5, leafBonus: 1, text: 'цена листа +25 %' },
-      { id: 'court-100', at: 1, leafBonus: 0, text: 'терраса с бассейном откроется в следующей версии' },
+      { id: 'court-100', at: 1, leafBonus: 0, text: 'открыта терраса с бассейном — ворота в восточном заборе' },
     ],
     gates: [
       { to: 'garden', x: gate, z: CZ.minZ + 0.45, requires: null },
-      { to: null, x: CZ.maxX - 0.45, z: (POOL_GATE.z0 + POOL_GATE.z1) / 2, requires: 'court-100',
-        locked: 'Терраса с бассейном — в следующей версии' },
+      { to: 'pool', x: CZ.maxX - 0.45, z: (POOL_GATE.z0 + POOL_GATE.z1) / 2, requires: 'court-100',
+        locked: 'Терраса с бассейном откроется, когда площадка будет убрана полностью' },
     ],
     inset: 0,
     obstacles,
@@ -328,17 +328,96 @@ export const COURT = (() => {
   };
 })();
 
+// ── зона 4: терраса с бассейном, восточнее сада и площадки ────
+// Здесь покупается воздуходувка. Деревянная терраса с грилем и столом, бассейн (листья в воду
+// не залетают — собираются у бортика), шезлонги, дерево. Приёмники — у гриля ($10) и скиммер ($15).
+export const PZ = { id: 'pool', name: 'Терраса с бассейном', leafCount: 22000, minX: CZ.maxX, maxX: 30, minZ: ZONE.minZ, maxZ: 3.6 };
+// ворота с террасы на юг — к скверу (следующая зона)
+export const PARK_GATE = { x: 26.5, x0: 25.75, x1: 27.25 };
+export const POOL = (() => {
+  const container = { x: PZ.minX + 0.62, z: 0.0, w: 1.3, d: 1.0, h: 1.05, rotY: Math.PI / 2 }; // табличкой на восток
+  const deck = { x0: PZ.minX + T, x1: 22.0, z0: PZ.minZ + T, z1: -2.6, h: 0.14 };
+  const pool = { x0: 22.6, x1: 27.6, z0: -6.4, z1: -2.2, rim: 0.3 };     // вода; rim — каменный бортик
+  const grill = { x0: 18.7, x1: 19.4, z0: -8.55, z1: -8.0, h: 1.05 };
+  const table = { x0: 19.3, x1: 20.7, z0: -5.6, z1: -4.4, h: 0.8 };
+  const loungers = [[23.0, 24.9], [25.5, 27.4]].map(([x0, x1]) => ({ x0, x1, z0: 0.4, z1: 1.05, h: 0.45 }));
+  const tree = { x: 28.7, z: 2.2, r: 0.35 };
+  const bushes = [[29.35, -4.6, 0.5], [29.4, -3.3, 0.45], [23.5, -8.5, 0.45]];
+  const inlets = [
+    { id: 'pool-a', name: 'Приёмник у гриля', x: 20.4, z: -7.3, r: 0.42, price: usd(10) },
+    { id: 'pool-b', name: 'Скиммер у бассейна', x: 25.1, z: pool.z1 + pool.rim + 0.62, r: 0.42, price: usd(15) },
+  ];
+  const r = pool.rim;
+  const obstacles = [
+    box('fence-w', PZ.minX - T, PZ.minX + T, PZ.minZ, PZ.maxZ, FENCE_H),
+    box('fence-n', PZ.minX, PZ.maxX + T, PZ.minZ - T, PZ.minZ + T, FENCE_H),
+    box('fence-e', PZ.maxX - T, PZ.maxX + T, PZ.minZ, PZ.maxZ, FENCE_H),
+    box('fence-s', PZ.minX, PZ.maxX + T, PZ.maxZ - T, PZ.maxZ + T, FENCE_H),
+    box('container', container.x - container.d / 2, container.x + container.d / 2, container.z - container.w / 2, container.z + container.w / 2, container.h),
+    // бассейн с бортиком: невысокий — его видно, но через него не пройти и листья в воду не задуваются
+    box('pool', pool.x0 - r, pool.x1 + r, pool.z0 - r, pool.z1 + r, 0.06),
+    box('grill', grill.x0, grill.x1, grill.z0, grill.z1, grill.h),
+    box('table', table.x0, table.x1, table.z0, table.z1, table.h),
+    ...loungers.map((l, k) => box(`lounger-${k}`, l.x0, l.x1, l.z0, l.z1, l.h)),
+    circle('tree', tree.x, tree.z, tree.r, 8),
+    ...bushes.map(([x, z, rr], k) => circle(`bush-${k}`, x, z, rr, 1.0)),
+  ];
+  const onDeck = (x, z) => x >= deck.x0 && x <= deck.x1 && z >= deck.z0 && z <= deck.z1;
+  const gate = (POOL_GATE.z0 + POOL_GATE.z1) / 2;
+  const density = (x, z, noise, drift) => {
+    const toFence = Math.min(x - PZ.minX, PZ.maxX - x, PZ.maxZ - z, z - PZ.minZ);
+    const toPool = Math.hypot(Math.max(pool.x0 - r - x, 0, x - pool.x1 - r), Math.max(pool.z0 - r - z, 0, z - pool.z1 - r));
+    let d = 0.03;
+    d += 1.5 * Math.exp(-((toFence / 1.0) ** 2));
+    d += 1.2 * Math.exp(-((toPool / 0.6) ** 2));                       // у бортика бассейна
+    d += 2.6 * Math.exp(-((Math.hypot(x - tree.x, z - tree.z) / 2.6) ** 2));
+    for (const [cx, cz, rr] of drift) d += 2.3 * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) / (rr * rr * 1.6));
+    d *= 0.5 + noise(x * 0.6, z * 0.6);
+    d = d ** 2;
+    if (onDeck(x, z)) d *= 0.7;
+    for (const i of inlets) if (Math.hypot(x - i.x, z - i.z) < i.r + 0.5) d *= 0.05;
+    if (Math.hypot(x - container.x, z - container.z) < 1.4) d *= 0.3;
+    if (Math.hypot(x - PZ.minX, z - gate) < 1.2) d *= 0.3;
+    return d;
+  };
+  return {
+    id: PZ.id, name: PZ.name, leafCount: PZ.leafCount, zone: PZ, signName: 'Терраса', genitive: 'террасы',
+    rewards: [
+      { id: 'pool-50', at: 0.5, leafBonus: 1, text: 'цена листа +25 %' },
+      { id: 'pool-100', at: 1, leafBonus: 0, text: 'сквер откроется в следующей версии' },
+    ],
+    gates: [
+      { to: 'court', x: PZ.minX + 0.45, z: gate, requires: null },
+      { to: null, x: PARK_GATE.x, z: PZ.maxZ - 0.45, requires: 'pool-100', locked: 'Сквер с лабиринтом — в следующей версии' },
+    ],
+    inset: 0,
+    obstacles,
+    spawn: { x: PZ.minX + 0.95, z: gate, yaw: -Math.PI / 2 },
+    container, shop: null, deck, pool, grill, table, loungers, tree, bushes, inlets,
+    surface: (x, z) => (onDeck(x, z) ? deck.h : 0),
+    onPath: onDeck,
+    density,
+    maxDensity: 14,
+    drifts: 9,
+    starter: null,
+    leafMargin: 0.08,
+    leafSize: 1.12,
+  };
+})();
+
 // где появляется игрок, входя в зону из другой (у ворот)
 export const ARRIVALS = {
   'yard>garden': GARDEN.spawn,
   'garden>yard': { x: ZONE.maxX - 0.9, z: (GARDEN_GATE.z0 + GARDEN_GATE.z1) / 2, yaw: Math.PI / 2 },
   'garden>court': COURT.spawn,
   'court>garden': { x: COURT_GATE.x, z: GZ.maxZ - 0.75, yaw: 0 },
+  'court>pool': POOL.spawn,
+  'pool>court': { x: CZ.maxX - 0.95, z: (POOL_GATE.z0 + POOL_GATE.z1) / 2, yaw: Math.PI / 2 },
 };
 
-export const LEVELS = { yard: YARD, garden: GARDEN, court: COURT, fragment: FRAGMENT };
+export const LEVELS = { yard: YARD, garden: GARDEN, court: COURT, pool: POOL, fragment: FRAGMENT };
 /** Зоны игры по порядку (фрагмент — отдельный режим проверки, не зона). */
-export const ZONE_ORDER = ['yard', 'garden', 'court'];
+export const ZONE_ORDER = ['yard', 'garden', 'court', 'pool'];
 
 export let level = YARD;
 export function setLevel(l) { level = typeof l === 'string' ? LEVELS[l] : l; }

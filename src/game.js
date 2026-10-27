@@ -46,7 +46,7 @@ export function createGame(save = null, opts = {}) {
       money: p.money, earned: p.earned,
       upgrades: { ...newProgress().upgrades, ...p.upgrades },
       bonuses: Array.isArray(p.bonuses) ? [...p.bonuses] : [],
-      tools: { rake: p.tools?.rake ? { ...p.tools.rake } : null },
+      tools: { rake: p.tools?.rake ? { ...p.tools.rake } : null, blower: p.tools?.blower ? { ...p.tools.blower } : null },
       inlets: Array.isArray(p.inlets) ? [...p.inlets] : [],
     };
     if (zones[level.id] && !field.restore(zones[level.id])) throw new Error(`Состояние зоны «${level.name}» в сохранении повреждено`);

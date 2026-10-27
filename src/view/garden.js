@@ -20,7 +20,7 @@ export function buildGarden(scene, MAT, M = {}) {
     [GZ.minX, GZ.maxZ, c0, GZ.maxZ], [c1, GZ.maxZ, GZ.maxX, GZ.maxZ],
   ], center, { seed: 57 });
   // ворота к площадке у гаража: лицевая табличка — в саду
-  const courtGate = buildLatticeGate(scene, MAT, c0, GZ.maxZ + 0.02, c1, GZ.maxZ + 0.02, -1);
+  const courtGate = buildLatticeGate(scene, MAT, c0, GZ.maxZ + 0.02, c1, GZ.maxZ + 0.02, 1);
 
   buildShed(scene, MAT, G.shed);
   if (M.tree3) placeModel(scene, M.tree3, { x: G.tree.x, z: G.tree.z, height: 6.2, tint: '#c9772f', rotY: 2.2 });
@@ -84,9 +84,9 @@ function buildShed(scene, MAT, S) {
  * Приёмник: решётка в земле. Не купленный закрыт деревянной крышкой с колышком-табличкой
  * (цена — в блокноте). setOwned(true) открывает решётку.
  */
-export function buildInlet(scene, MAT, n) {
+export function buildInlet(scene, MAT, n, y = 0) {
   const g = new THREE.Group();
-  g.position.set(n.x, 0, n.z);
+  g.position.set(n.x, y, n.z);
   const ring = add(g, new THREE.TorusGeometry(n.r, 0.035, 8, 32), MAT.metal, 0, 0.012, 0, { cast: false });
   ring.rotation.x = Math.PI / 2;
   add(g, new THREE.CircleGeometry(n.r, 32).rotateX(-Math.PI / 2), lambert('#17130f'), 0, 0.004, 0, { cast: false });

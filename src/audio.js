@@ -1,4 +1,4 @@
-// Звук без файлов: синтез через Web Audio. Шорох, сдача, покупка, спокойный фон.
+// Звук без файлов: синтез через Web Audio. Шорох, грабли, воздуходувка, сдача, покупка, спокойный фон.
 // Громкость общая, эффектов и фона настраивается отдельно.
 
 export class Sound {
@@ -114,6 +114,42 @@ export class Sound {
 
   denied() {
     this.tone(220, { dur: 0.14, gain: 0.08, type: 'triangle', slide: -40 });
+  }
+
+  /** Взмах граблями: короткий скребущий шорох зубьев по земле. */
+  rake() {
+    this.burst({ dur: 0.3, freq: 2200, q: 1.2, gain: 0.12, attack: 0.04, sweep: -900 });
+  }
+
+  /**
+   * Воздуходувка: гул мотора и шум струи, громкость и высота — по разгону 0…1.
+   * Вызывается каждый кадр; 0 — выключена.
+   */
+  blower(level) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    if (!this.blowerNodes && level > 0) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise; src.loop = true;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.Q.value = 0.7; bp.frequency.value = 900;
+      const motor = ctx.createOscillator();
+      motor.type = 'sawtooth'; motor.frequency.value = 90;
+      const mlp = ctx.createBiquadFilter();
+      mlp.type = 'lowpass'; mlp.frequency.value = 400;
+      const g = ctx.createGain(), mg = ctx.createGain();
+      g.gain.value = 0; mg.gain.value = 0;
+      src.connect(bp).connect(g).connect(this.effects);
+      motor.connect(mlp).connect(mg).connect(this.effects);
+      src.start(); motor.start();
+      this.blowerNodes = { src, bp, motor, g, mg };
+    }
+    const n = this.blowerNodes;
+    if (!n) return;
+    n.g.gain.setTargetAtTime(level * 0.16, t, 0.08);
+    n.mg.gain.setTargetAtTime(level * 0.05, t, 0.08);
+    n.bp.frequency.setTargetAtTime(700 + level * 900, t, 0.1);
+    n.motor.frequency.setTargetAtTime(70 + level * 75, t, 0.1);
   }
 
   startAmbient() {

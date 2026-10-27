@@ -1,6 +1,6 @@
 // Интерфейс поверх сцены: HUD, подсказки, магазин-блокнот, пауза и настройки.
 
-import { UPGRADES, BRANCHES, LOCKED_TOOLS, RAKE, RAKE_BRANCHES, formatMoney, formatGain, plural } from './config.js';
+import { UPGRADES, BRANCHES, LOCKED_TOOLS, TOOLS, formatMoney, formatGain, plural } from './config.js';
 import { level } from './layout.js';
 import { nextLevel, ALL_INLETS, zoneUnlocked } from './economy.js';
 
@@ -101,10 +101,11 @@ export class UI {
 
   show(name, on = true) { this.el[name].hidden = !on; }
 
-  /** Слоты инструментов: грабли появляются, когда куплены. */
-  tools(active, rakeOwned) {
-    this.set('tools', `${active}|${rakeOwned}`, () => {
-      document.querySelector('#tools [data-tool="rake"]').hidden = !rakeOwned;
+  /** Слоты инструментов: грабли и воздуходувка появляются, когда куплены (owned — progress.tools). */
+  tools(active, owned) {
+    const key = Object.keys(TOOLS).map((t) => (owned[t] ? t : '')).join(',');
+    this.set('tools', `${active}|${key}`, () => {
+      for (const t of Object.keys(TOOLS)) document.querySelector(`#tools [data-tool="${t}"]`).hidden = !owned[t];
       for (const el of document.querySelectorAll('#tools .slot')) el.classList.toggle('active', el.dataset.tool === active);
     });
   }
@@ -152,16 +153,22 @@ export class UI {
         maxText: `<span class="next">${u.unit(u.values[lvl])}</span> — лучше уже некуда`,
       }));
     }
-    // грабли: покупка, затем три ветки улучшений
+    // грабли и воздуходувка: покупка, затем по три ветки улучшений
     const rk = document.getElementById('rake-rows');
     rk.textContent = '';
-    if (!p.tools.rake) {
-      rk.append(addRow({ title: RAKE.title, hint: RAKE.info, next: economy.offer('rake'), key: 'rake', after: RAKE.info, maxText: '' }));
-    } else {
-      for (const b of RAKE_BRANCHES) {
-        const u = RAKE.branches[b], lvl = p.tools.rake[b], next = economy.offer(`rake:${b}`);
+    for (const [id, T] of Object.entries(TOOLS)) {
+      if (!p.tools[id]) {
+        rk.append(addRow({ title: T.title, hint: T.info, next: economy.offer(id), key: id, after: T.info, maxText: '' }));
+        continue;
+      }
+      const head = document.createElement('div');
+      head.className = 'tool-head';
+      head.textContent = T.title;
+      rk.append(head);
+      for (const b of Object.keys(T.branches)) {
+        const u = T.branches[b], lvl = p.tools[id][b], next = economy.offer(`${id}:${b}`);
         rk.append(addRow({
-          title: u.title, hint: u.hint, lvl, steps: u.prices.length, next, key: `rake:${b}`,
+          title: u.title, hint: u.hint, lvl, steps: u.prices.length, next, key: `${id}:${b}`,
           now: next && u.unit(next.current, lvl), after: next && u.unit(next.value, lvl + 1),
           maxText: `<span class="next">${u.unit(u.values[lvl], lvl)}</span> — лучше уже некуда`,
         }));
@@ -173,13 +180,14 @@ export class UI {
       const next = own ? null : economy.offer(`inlet:${n.id}`);
       const row = addRow({
         title: n.name, hint: 'листья, протащенные граблями над решёткой, продаются сразу', next, key: `inlet:${n.id}`,
-        after: 'продаёт листья без мешка', maxText: own ? 'работает' : '<span class="dim">сначала грабли</span>',
+        after: 'продаёт листья без мешка', maxText: own ? 'работает' : '<span class="dim">сначала грабли или воздуходувка</span>',
       });
       if (!own && !next) row.querySelector('button').textContent = formatMoney(n.price);
       rk.append(row);
     }
     // инструменты из таблицы, которых ещё нет: цены видны, купить нельзя
     const locked = document.getElementById('locked-tools');
+    locked.hidden = !LOCKED_TOOLS.length;
     locked.innerHTML = LOCKED_TOOLS.map((t) =>
       `<div class="dim"><b>${t.title}</b> · ${formatMoney(t.price)} — ${t.info} <span class="tag">ещё нет в игре</span>` +
       `<div class="sub">${t.upgrades.map((u) => `${u.title}: ${u.prices.map(formatMoney).join(' → ')} (${u.info})`).join('<br>')}</div></div>`).join('');

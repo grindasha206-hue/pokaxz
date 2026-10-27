@@ -6,6 +6,7 @@ import { ZONE } from '../config.js';
 import { CONTAINER, SHOP, TREE, PORCH, PORCH_STEP, GARDEN_GATE, T as FENCE_T, FENCE_H, level } from '../layout.js';
 import { buildGarden } from './garden.js';
 import { buildCourt } from './court.js';
+import { buildPool } from './pool.js';
 import { mulberry32 } from '../leaves.js';
 import { grassTexture, plasterTexture, woodTexture, roofTexture, signTexture, boardTexture, barkTexture } from './textures.js';
 import { placeModel, worldUV } from './yardAssets.js';
@@ -75,13 +76,15 @@ export function buildWorld(scene, assets = { mats: {}, models: {} }, lvl = level
   refs.shop = buildShop(scene, MAT);
   const garden = buildGarden(scene, MAT, M);
   const court = buildCourt(scene, MAT, M);
-  refs.container = { yard: yardContainer, garden: garden.container, court: court.container }[lvl.id] ?? yardContainer;
-  refs.inlets = new Map([...garden.inlets, ...court.inlets]);
+  const pool = buildPool(scene, MAT, M);
+  refs.container = { yard: yardContainer, garden: garden.container, court: court.container, pool: pool.container }[lvl.id] ?? yardContainer;
+  refs.inlets = new Map([...garden.inlets, ...court.inlets, ...pool.inlets]);
   // таблички ворот: «откуда>куда» — с той стороны, откуда к ним подходят
   refs.gateSigns = {
     'yard>garden': refs.gardenGate.setSign, 'garden>yard': refs.gardenGate.setBackSign,
     'garden>court': garden.courtGate.setSign, 'court>garden': garden.courtGate.setBackSign,
-    'court>pool': court.poolGate.setSign,
+    'court>pool': court.poolGate.setSign, 'pool>court': court.poolGate.setBackSign,
+    'pool>park': pool.parkGate.setSign,
   };
   buildSurroundings(scene, MAT, M);
   return refs;
@@ -279,7 +282,8 @@ export function buildFenceRuns(scene, MAT, runs, center, { extra = [], low = [],
 
 /**
  * Ворота: низкие доски, сверху решётка из диагональных реек — сквозь неё видна соседняя зона.
- * side — с какой стороны висит табличка (±1 по нормали к воротам). Возвращает { setSign(lines) }.
+ * side — с какой стороны лицевая табличка: ±1 по локальной оси X ворот (ворота вдоль Z: −1 — запад;
+ * ворота вдоль X: +1 — север, −1 — юг). Возвращает { setSign(lines), setBackSign(lines) }.
  */
 export function buildLatticeGate(scene, MAT, x0, z0, x1, z1, side = 1) {
   const H = FENCE_H, gateLow = 1.15;

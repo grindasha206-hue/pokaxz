@@ -57,6 +57,8 @@ function drifts(rng, n) {
   return out;
 }
 
+const cellKey = (x, z) => Math.floor(x / STACK_R) * 65536 + Math.floor(z / STACK_R);
+
 export class LeafField {
   constructor(count) {
     this.count = count;
@@ -127,10 +129,18 @@ export class LeafField {
   /** Ставит лист в точку (с выталкиванием из препятствий). Сетку и версию обновляет вызывающий. */
   moveTo(i, x, z) {
     const p = resolveCircle(x, z, level.leafMargin);
+    const k0 = cellKey(this.x[i], this.z[i]), k1 = cellKey(p.x, p.z);
     this.x[i] = p.x; this.z[i] = p.z;
     this.moved[i] = 1;
     this.order[i] = this.topOrder++;
-    this.grid = null;
+    // сетка обновляется на месте: воздуходувка двигает листья каждый такт
+    if (this.grid && k0 !== k1) {
+      const a = this.grid.get(k0), j = a ? a.indexOf(i) : -1;
+      if (j >= 0) { a[j] = a[a.length - 1]; a.pop(); }
+      let b = this.grid.get(k1);
+      if (!b) this.grid.set(k1, (b = []));
+      b.push(i);
+    }
   }
 
   /** Индексы листьев в порядке укладки (снизу вверх). */
@@ -147,10 +157,13 @@ export class LeafField {
   resettle(minX, minZ, maxX, maxZ) {
     if (!this.grid) this.buildGrid();
     const m = LEAF_EXTENT, ids = [];
-    for (let i = 0; i < this.count; i++) {
-      if (this.state[i] !== ON_GROUND) continue;
-      if (this.x[i] < minX - m || this.x[i] > maxX + m || this.z[i] < minZ - m || this.z[i] > maxZ + m) continue;
-      ids.push(i);
+    const cx0 = Math.floor((minX - m) / STACK_R), cx1 = Math.floor((maxX + m) / STACK_R);
+    const cz0 = Math.floor((minZ - m) / STACK_R), cz1 = Math.floor((maxZ + m) / STACK_R);
+    for (let cx = cx0; cx <= cx1; cx++) {
+      for (let cz = cz0; cz <= cz1; cz++) {
+        const arr = this.grid.get(cx * 65536 + cz);
+        if (arr) for (const i of arr) if (this.state[i] === ON_GROUND) ids.push(i);
+      }
     }
     ids.sort((a, b) => this.order[a] - this.order[b]);
     const tmp = [], changed = [];
@@ -189,10 +202,9 @@ export class LeafField {
   // какие листья лежат ниже. Поэтому после сбора нижних верхние опускаются.
 
   buildGrid() {
-    const cell = STACK_R;
     const g = new Map();
     for (let i = 0; i < this.count; i++) {
-      const key = Math.floor(this.x[i] / cell) * 65536 + Math.floor(this.z[i] / cell);
+      const key = cellKey(this.x[i], this.z[i]);
       let arr = g.get(key);
       if (!arr) g.set(key, (arr = []));
       arr.push(i);

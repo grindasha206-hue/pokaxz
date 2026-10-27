@@ -6,12 +6,12 @@
 // Доход начисляется при сдаче. Баланс проверяем так: money = earned − потрачено,
 // а earned лежит между «все листья по базовой цене» и «все по цене с бонусами».
 
-import { UPGRADES, BRANCHES, LEAF_VALUE, LEAF_BONUS, RAKE, RAKE_BRANCHES } from './config.js';
+import { UPGRADES, BRANCHES, LEAF_VALUE, LEAF_BONUS, TOOLS } from './config.js';
 import { ON_GROUND, IN_BAG, SOLD } from './leaves.js';
 import { LEVELS, ZONE_ORDER } from './layout.js';
 
 export function newProgress() {
-  return { money: 0, earned: 0, upgrades: { grab: 0, speed: 0, bag: 0 }, bonuses: [], tools: { rake: null }, inlets: [] };
+  return { money: 0, earned: 0, upgrades: { grab: 0, speed: 0, bag: 0 }, bonuses: [], tools: { rake: null, blower: null }, inlets: [] };
 }
 
 /** Все приёмники игры (для цен и проверки сохранения). */
@@ -46,13 +46,14 @@ export function spentOn(upgrades) {
   return total;
 }
 
-/** Всё потраченное: улучшения руки и мешка, грабли с улучшениями, приёмники. */
+/** Всё потраченное: улучшения руки и мешка, инструменты с улучшениями, приёмники. */
 export function spentTotal(progress) {
   let total = spentOn(progress.upgrades);
-  const rake = progress.tools?.rake;
-  if (rake) {
-    total += RAKE.price;
-    for (const b of RAKE_BRANCHES) for (let l = 0; l < rake[b]; l++) total += RAKE.branches[b].prices[l];
+  for (const [id, T] of Object.entries(TOOLS)) {
+    const lv = progress.tools?.[id];
+    if (!lv) continue;
+    total += T.price;
+    for (const b of Object.keys(T.branches)) for (let l = 0; l < lv[b]; l++) total += T.branches[b].prices[l];
   }
   for (const id of progress.inlets ?? []) total += ALL_INLETS.find((n) => n.id === id)?.price ?? 0;
   return total;
@@ -75,7 +76,8 @@ export class Economy {
     this.allRewards = ctx.allRewards ?? rewards;
     this.otherSold = ctx.otherSold ?? 0;
     this.rewardReached = ctx.rewardReached ?? (() => false);
-    progress.tools ??= { rake: null };
+    progress.tools ??= {};
+    for (const id of Object.keys(TOOLS)) progress.tools[id] ??= null;
     progress.inlets ??= [];
     this.lastGain = 0;
     this.recount();
@@ -101,6 +103,9 @@ export class Economy {
   }
 
   get rake() { return this.progress.tools.rake; }
+  get blower() { return this.progress.tools.blower; }
+  /** Есть ли инструмент, которым листья гоняются в приёмники. */
+  get hasTool() { return !!(this.progress.tools.rake || this.progress.tools.blower); }
 
   /** Цена одного листа сейчас, в единицах $0,0001. */
   get leafValue() { return LEAF_VALUE + LEAF_BONUS * this.leafBonuses; }
@@ -177,21 +182,22 @@ export class Economy {
 
   /**
    * Что можно купить по ключу: 'grab' | 'speed' | 'bag' — ступени руки и мешка,
-   * 'rake' — грабли, 'rake:handle' и т. п. — ступени граблей, 'inlet:<id>' — приёмник.
+   * 'rake' / 'blower' — инструмент, 'rake:handle', 'blower:power' и т. п. — его ступени, 'inlet:<id>' — приёмник.
    * Возвращает { price, value, current, level } или null (нельзя купить вовсе).
    */
   offer(key) {
     const p = this.progress;
     if (UPGRADES[key]) return nextLevel(p, key);
-    if (key === 'rake') return p.tools.rake ? null : { price: RAKE.price };
-    if (key.startsWith('rake:')) {
-      const b = RAKE.branches[key.slice(5)], lv = p.tools.rake?.[key.slice(5)];
+    const [tool, branch] = key.split(':');
+    if (TOOLS[tool] && branch === undefined) return p.tools[tool] ? null : { price: TOOLS[tool].price, tool };
+    if (TOOLS[tool]) {
+      const b = TOOLS[tool].branches[branch], lv = p.tools[tool]?.[branch];
       if (!b || lv === undefined || lv >= b.prices.length) return null;
       return { price: b.prices[lv], value: b.values[lv + 1], current: b.values[lv], level: lv + 1 };
     }
     if (key.startsWith('inlet:')) {
       const n = ALL_INLETS.find((x) => x.id === key.slice(6));
-      if (!n || n.price === 0 || p.inlets.includes(n.id) || !p.tools.rake || !zoneUnlocked(p, n.zone)) return null;
+      if (!n || n.price === 0 || p.inlets.includes(n.id) || !this.hasTool || !zoneUnlocked(p, n.zone)) return null;
       return { price: n.price, inlet: n };
     }
     return null;
@@ -209,8 +215,8 @@ export class Economy {
     const p = this.progress;
     p.money -= o.price;
     if (UPGRADES[key]) p.upgrades[key]++;
-    else if (key === 'rake') p.tools.rake = { handle: 0, sweep: 0, sticky: 0 };
-    else if (key.startsWith('rake:')) p.tools.rake[key.slice(5)]++;
+    else if (TOOLS[key]) p.tools[key] = Object.fromEntries(Object.keys(TOOLS[key].branches).map((b) => [b, 0]));
+    else if (TOOLS[key.split(':')[0]]) p.tools[key.split(':')[0]][key.split(':')[1]]++;
     else p.inlets.push(o.inlet.id);
     return o;
   }
@@ -229,19 +235,26 @@ export class Economy {
       if (v !== up[b] || v < 0 || v > max) fixes.push(`upgrade ${b}`);
       up[b] = Math.min(Math.max(v, 0), max);
     }
-    // грабли: либо нет, либо уровни веток в пределах таблицы
-    const rk = p.tools?.rake;
-    if (rk && typeof rk === 'object') {
-      for (const b of RAKE_BRANCHES) {
-        const max = RAKE.branches[b].prices.length, v = Number.isInteger(rk[b]) ? rk[b] : 0;
-        if (v !== rk[b] || v < 0 || v > max) fixes.push(`rake ${b}`);
-        rk[b] = Math.min(Math.max(v, 0), max);
+    // инструменты: либо нет, либо уровни веток в пределах таблицы
+    const tools = {};
+    for (const [id, T] of Object.entries(TOOLS)) {
+      const lv = p.tools?.[id];
+      if (lv && typeof lv === 'object') {
+        for (const b of Object.keys(T.branches)) {
+          const max = T.branches[b].prices.length, v = Number.isInteger(lv[b]) ? lv[b] : 0;
+          if (v !== lv[b] || v < 0 || v > max) fixes.push(`${id} ${b}`);
+          lv[b] = Math.min(Math.max(v, 0), max);
+        }
+        tools[id] = lv;
+      } else {
+        if (lv != null) fixes.push(id);
+        tools[id] = null;
       }
-    } else if (rk != null) fixes.push('rake');
-    p.tools = { rake: rk && typeof rk === 'object' ? rk : null };
-    // приёмники: известные, платные, без повторов и только при граблях
+    }
+    p.tools = tools;
+    // приёмники: известные, платные, без повторов и только при инструменте
     const inl = Array.isArray(p.inlets) ? p.inlets : [];
-    const inOk = p.tools.rake ? [...new Set(inl)].filter((id) => ALL_INLETS.some((n) => n.id === id && n.price > 0)) : [];
+    const inOk = this.hasTool ? [...new Set(inl)].filter((id) => ALL_INLETS.some((n) => n.id === id && n.price > 0)) : [];
     if (inOk.length !== inl.length) fixes.push('inlets');
     p.inlets = inOk;
     this.recount();
@@ -267,7 +280,7 @@ export class Economy {
     if (earned - spentTotal(p) < 0) {
       // покупок больше, чем заработано, — сохранение повреждено; откатываем покупки
       for (const b of BRANCHES) up[b] = 0;
-      p.tools.rake = null;
+      for (const id of Object.keys(TOOLS)) p.tools[id] = null;
       p.inlets = [];
       fixes.push('upgrades exceed earnings');
     }

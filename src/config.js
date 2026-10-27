@@ -73,17 +73,40 @@ export const RAKE_BRANCHES = Object.keys(RAKE.branches);
 // back — глубина валика перед зубьями, carry — сколько листьев валик может тащить за раз.
 export const RAKE_STROKE = { time: 0.42, reachK: 0.65, minStart: 1.05, reach: 0.14, back: 0.12, carry: 400 };
 
-// Воздуходувки в игре ещё нет: показывается в блокноте, но не продаётся.
-export const LOCKED_TOOLS = [
-  {
-    title: 'Воздуходувка', price: usd(49.99), info: 'гнать листья по двору и в приёмники',
-    upgrades: [
-      { title: 'Ширина потока', prices: [28, 35, 40, 46, 50].map(usd), info: '0,55 → 0,75 м' },
-      { title: 'Мощность', prices: [15, 20, 24, 27].map(usd), info: 'до 2400 Вт, запуск 0,2 с' },
-      { title: 'Точность', prices: [10, 16, 21, 25].map(usd), info: 'разброс 0,48 → 0,12' },
-    ],
+// Воздуходувка — по таблице Leaf it Alone: покупка и три ветки улучшений; values[0] — без улучшений.
+export const BLOWER = {
+  title: 'Воздуходувка', price: usd(49.99), info: 'гонит листья потоком воздуха — в кучи и в приёмники',
+  branches: {
+    width: {
+      title: 'Ширина потока', hint: 'ширина струи у сопла',
+      values: [0.55, 0.59, 0.63, 0.67, 0.71, 0.75],
+      unit: (v) => `${v.toFixed(2).replace('.', ',')} м`,
+      prices: [28, 35, 40, 46, 50].map(usd),
+    },
+    power: {
+      title: 'Мощность', hint: 'дальность и сила струи, время разгона',
+      values: [1500, 1730, 1960, 2180, 2400], startup: [0.6, 0.5, 0.4, 0.3, 0.2],
+      unit: (v, k) => `${v} Вт, разгон ${BLOWER.branches.power.startup[k].toFixed(1).replace('.', ',')} с`,
+      prices: [15, 20, 24, 27].map(usd),
+    },
+    accuracy: {
+      title: 'Точность', hint: 'разброс листьев в струе (меньше — точнее)',
+      values: [0.48, 0.39, 0.3, 0.21, 0.12],
+      unit: (v) => `разброс ${v.toFixed(2).replace('.', ',')}`,
+      prices: [10, 16, 21, 25].map(usd),
+    },
   },
-];
+};
+export const BLOWER_BRANCHES = Object.keys(BLOWER.branches);
+// Струя: начинается в start м перед игроком; дальность range0 + rangeK·(мощность − 1500)/900;
+// скорость листа у сопла speed·мощность/1500 м/с, к концу струи падает до нуля. Логика — тактами tick с.
+export const BLOWER_STREAM = { start: 0.35, range0: 1.7, rangeK: 1.1, spreadK: 0.14, speed: 3.0, tick: 0.05, cap: 700 };
+
+/** Инструменты, которые покупаются: грабли и воздуходувка (ключи в progress.tools). */
+export const TOOLS = { rake: RAKE, blower: BLOWER };
+
+// Инструменты из таблицы, которых ещё нет в игре: показываются в блокноте, но не продаются.
+export const LOCKED_TOOLS = [];
 
 /** $1234,5678 → «$1234,56»: всегда два знака, дробь отбрасывается (не завышаем баланс). */
 export function formatMoney(units) {

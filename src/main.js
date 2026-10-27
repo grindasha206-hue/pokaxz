@@ -1,13 +1,15 @@
 // Точка входа: сцена, управление, цикл игры, сохранение.
 
 import * as THREE from '../vendor/three.module.min.js';
-import { PLAYER, UPGRADES, RAKE, RAKE_STROKE, REMAINING_HIGHLIGHT, LEGACY_BACKUP_KEY, formatGain, formatMoney, plural } from './config.js';
+import { PLAYER, UPGRADES, RAKE, RAKE_STROKE, BLOWER_STREAM, TOOLS, REMAINING_HIGHLIGHT, LEGACY_BACKUP_KEY, formatGain, formatMoney, plural } from './config.js';
 import { level, setLevel, distToObstacle, resolveCircle, segmentBlocked, surfaceHeight, ZONE_ORDER, LEVELS, ARRIVALS } from './layout.js';
 import { ON_GROUND } from './leaves.js';
 import { createGame, zoneUnlocked } from './game.js';
 import { ALL_INLETS } from './economy.js';
 import { rakeStats, strokeSpan, rakeStroke, activeInlets } from './rake.js';
 import { RakeView } from './view/rakeView.js';
+import { blowerStats, blowTick } from './blower.js';
+import { BlowerView } from './view/blowerView.js';
 import { buildSave, parseSave, readLocal, readLocalRaw, writeLocal, clearLocal, isLegacySave } from './save.js';
 import { buildWorld } from './view/scene.js';
 import { Ground } from './view/ground.js';
@@ -104,9 +106,10 @@ if (FRAGMENT_MODE) {
 }
 const leaves = new LeafView(scene, field, leafTextures, { size: level.leafSize });
 const rakeView = new RakeView(scene);
+const blowerView = new BlowerView(scene);
 // приёмники сада видны и из двора: открыта решётка или крышка
 for (const [id, v] of world.inlets ?? []) v.setOwned(ALL_INLETS.some((n) => n.id === id && (n.price === 0 || economy.progress.inlets.includes(id))));
-ui.tools('hand', !!economy.rake);
+ui.tools('hand', economy.progress.tools);
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -138,9 +141,9 @@ let ignoreClicksUntil = 0;      // клик, которым захватили �
 let pick = null;                // { target, elapsed, duration }
 let hoverId = -1, hoverGroup = [];
 let fullHintUntil = 0, lastDenied = 0;
-let tool = 'hand';              // hand | rake
+let tool = 'hand';              // hand | rake | blower
 let stroke = null;              // взмах граблей: { t, span, done }
-let rakeIdle = 0;               // сколько голова граблей лежит без дела (для возврата в исходную точку)
+let spin = 0, blowAcc = 0;      // воздуходувка: разгон 0…1 и накопленное время до следующего такта струи
 let now = 0;
 let dirty = false, lastSave = 0;
 let lastStep = 0;
@@ -176,7 +179,12 @@ document.addEventListener('keydown', (e) => {
     case 'KeyF': interact(); break;
     case 'Digit1': selectTool('hand'); break;
     case 'Digit2': selectTool('rake'); break;
-    case 'KeyQ': selectTool(tool === 'hand' ? 'rake' : 'hand'); break;
+    case 'Digit3': selectTool('blower'); break;
+    case 'KeyQ': { // по кругу среди того, что есть
+      const own = ['hand', ...Object.keys(TOOLS).filter((t) => economy.progress.tools[t])];
+      selectTool(own[(own.indexOf(tool) + 1) % own.length]);
+      break;
+    }
   }
 });
 document.addEventListener('keyup', (e) => {
@@ -264,6 +272,7 @@ function stopWork() {
   pickRequested = false;
   mouseHeld = false;
   autoCollect = false;
+  spin = 0;
   player.vx = player.vz = 0;
 }
 
@@ -348,17 +357,21 @@ if (legacyPending) {
 
 // ── действия ─────────────────────────────────────────────────
 function selectTool(name) {
-  if (name === 'rake' && !economy.rake) {
-    ui.toast(`Грабли продаются в блокноте (<kbd>Tab</kbd>) за ${formatMoney(RAKE.price)}`, 2200);
+  if (TOOLS[name] && !economy.progress.tools[name]) {
+    ui.toast(`${TOOLS[name].title} — в блокноте (<kbd>Tab</kbd>) за ${formatMoney(TOOLS[name].price)}`, 2200);
     return;
   }
   if (name === tool) return;
   tool = name;
-  pick = null; stroke = null;
-  ui.tools(tool, !!economy.rake);
+  pick = null; stroke = null; spin = 0;
+  ui.tools(tool, economy.progress.tools);
   if (tool === 'rake' && !game.hints.raked) {
     ui.toast('Грабли: наведите на листья и удерживайте кнопку — листья тянутся к вам. ' +
       'Протащите кучу над приёмником, и она продастся сразу. <kbd>1</kbd> — рука', 6000);
+  }
+  if (tool === 'blower' && !game.hints.blown) {
+    ui.toast('Воздуходувка: удерживайте кнопку — струя гонит листья от вас, они собираются валом. ' +
+      'Гоните вал к приёмнику; у заборов листья удобнее отвести граблями. <kbd>1</kbd> — рука', 7000);
   }
 }
 
@@ -441,12 +454,14 @@ function zoneDoneText() {
 }
 
 // таблички на воротах: куда ведут и открыты ли (зон, которых ещё нет, — «скоро»)
-const SOON = { pool: ['Терраса', 'с бассейном', '— скоро'] };
+const SOON = { park: ['Сквер', 'с лабиринтом', '— скоро'] };
 function updateGateSigns() {
   for (const [key, set] of Object.entries(world.gateSigns ?? {})) {
     const [from, to] = key.split('>'), L = LEVELS[to];
     if (!L) { set(SOON[to] ?? ['— скоро']); continue; }
-    set(zoneUnlocked(economy.progress, to) ? [L.signName, 'F — пройти'] : [L.signName, 'откроется после', `уборки ${LEVELS[from].genitive}`]);
+    // открывается уборкой той зоны, из которой в неё ведут ворота с условием
+    const by = ZONE_ORDER.find((z) => (LEVELS[z].gates ?? []).some((g) => g.to === to && g.requires)) ?? from;
+    set(zoneUnlocked(economy.progress, to) ? [L.signName, 'F — пройти'] : [L.signName, 'откроется после', `уборки ${LEVELS[by].genitive}`]);
   }
 }
 
@@ -467,11 +482,12 @@ function buy(key, btn) {
     const u = UPGRADES[key];
     text = `${u.title} улучшен: <b>${key === 'grab' ? `теперь ${u.unit(res.value)} за раз`
       : key === 'speed' ? `подбор за ${u.unit(res.value)}` : `в мешок помещается ${u.unit(res.value)}`}</b>`;
-  } else if (key === 'rake') {
-    text = 'Куплены <b>грабли</b>: клавиша <kbd>2</kbd> или <kbd>Q</kbd>';
-    ui.tools(tool, true);
-  } else if (key.startsWith('rake:')) {
-    const b = RAKE.branches[key.slice(5)];
+  } else if (TOOLS[key]) {
+    text = key === 'rake' ? 'Куплены <b>грабли</b>: клавиша <kbd>2</kbd> или <kbd>Q</kbd>'
+      : 'Куплена <b>воздуходувка</b>: клавиша <kbd>3</kbd> или <kbd>Q</kbd>';
+    ui.tools(tool, economy.progress.tools);
+  } else if (TOOLS[key.split(':')[0]]) {
+    const [t, br] = key.split(':'), b = TOOLS[t].branches[br];
     text = `${b.title}: <b>${b.unit(res.value, res.level)}</b>`;
   } else {
     text = `${res.inlet.name} открыт`;
@@ -619,29 +635,64 @@ function updateRake(dt) {
   stroke = { t: 0, span };
   const p = { x: player.x, z: player.z, yaw: player.yaw };
   const r = rakeStroke(field, p, st, span, activeInlets(economy.progress));
-  sound.rake?.();
+  sound.rake();
   if (!r.moved.length && !r.absorbed.length) return;
-  const pull = RAKE_STROKE.time * PULL;
-  leaves.slide(r.moved, field.resettle(...r.box), now, pull);
+  const n = applyMoves(r, RAKE_STROKE.time * PULL);
+  sound.rustle(Math.min(10, Math.ceil(r.moved.length / 8) + n));
+  game.hints.raked = true;
+}
+
+/**
+ * Общее для граблей и воздуходувки: сдвинутые листья едут на экране dur секунд, куча
+ * перестраивается, листья над приёмниками проваливаются и продаются. Возвращает число проданных.
+ */
+let sale = { n: 0, gain: 0, at: 0 };
+function applyMoves(r, dur) {
+  if (r.moved.length) leaves.slide(r.moved, field.resettle(...r.box), now, dur);
   let n = 0, gain = 0;
   for (const a of r.absorbed) {
-    const k = economy.sellDirect(a.ids);
-    n += k; gain += economy.lastGain;
-    leaves.sink(a.from, a.inlet, now, pull + 0.2);
+    n += economy.sellDirect(a.ids); gain += economy.lastGain;
+    leaves.sink(a.from, a.inlet, now, dur + 0.2);
   }
-  sound.rustle(Math.min(10, Math.ceil(r.moved.length / 8) + n));
-  if (n) {
-    ui.money(economy.money, gain);
-    ui.toast(`В приёмник: ${n} ${plural(n, 'лист', 'листа', 'листьев')} · <b>${formatGain(gain)}</b>`, 1400);
-    sound.deposit(Math.min(n, 30));
-    for (const rw of economy.checkRewards()) {
-      setTimeout(() => ui.toast(`${level.name} убран на ${Math.round(rw.at * 100)} %: <b>${rw.text}</b>`, 3600), 400);
-      saveNow();
-    }
-    if (economy.remaining === 0 && economy.inBag === 0) setTimeout(() => ui.toast(zoneDoneText(), 5000), 1600);
-  }
-  game.hints.raked = true;
   dirty = true;
+  if (!n) return 0;
+  ui.money(economy.money, gain);
+  sound.deposit(Math.min(n, 30));
+  // продажи подряд (воздуходувка — каждый такт) складываются в одно сообщение
+  if (now - sale.at > 1.5) sale = { n: 0, gain: 0, at: now };
+  sale.n += n; sale.gain += gain; sale.at = now;
+  ui.toast(`В приёмник: ${sale.n} ${plural(sale.n, 'лист', 'листа', 'листьев')} · <b>${formatGain(sale.gain)}</b>`, 1400);
+  for (const rw of economy.checkRewards()) {
+    setTimeout(() => ui.toast(`${level.name} убран на ${Math.round(rw.at * 100)} %: <b>${rw.text}</b>`, 3600), 400);
+    saveNow();
+  }
+  if (economy.remaining === 0 && economy.inBag === 0) setTimeout(() => ui.toast(zoneDoneText(), 5000), 1600);
+  return n;
+}
+
+// ── воздуходувка ─────────────────────────────────────────────
+// Пока кнопка удерживается, струя набирает силу (разгон по мощности) и каждые 0,05 с сдвигает
+// листья; отпустили — мотор стихает. Логика тактами, чтобы скорость не зависела от частоты кадров.
+function updateBlower(dt) {
+  const held = mouseHeld || pickRequested || autoCollect || (settings.collectMode === 'hold' && keys.has('KeyE'));
+  pickRequested = false;
+  hoverId = -1; hoverGroup = [];
+  const st = blowerStats(economy.blower);
+  spin = held ? Math.min(1, spin + dt / st.startup) : Math.max(0, spin - dt * 2.5);
+  if (!held) { blowAcc = 0; return; }
+  blowAcc = Math.min(blowAcc + dt, BLOWER_STREAM.tick * 4);
+  const ins = activeInlets(economy.progress);
+  const p = { x: player.x, z: player.z, yaw: player.yaw };
+  let moved = 0;
+  while (blowAcc >= BLOWER_STREAM.tick) {
+    blowAcc -= BLOWER_STREAM.tick;
+    const r = blowTick(field, p, st, spin, BLOWER_STREAM.tick, ins);
+    moved += r.moved.length;
+    if (r.moved.length || r.absorbed.length) applyMoves(r, BLOWER_STREAM.tick);
+    for (const { i } of r.moved) leaves.flutter(i, spin);
+  }
+  if (moved && now - lastStep > 0.2) { sound.rustle(Math.min(6, Math.ceil(moved / 30))); lastStep = now; }
+  if (moved) game.hints.blown = true;
 }
 
 /** Где голова граблей сейчас: расстояние от игрока и подъём (возврат после протяжки). */
@@ -833,6 +884,7 @@ function frame(t) {
   camera.updateMatrixWorld();
   if (state === 'playing') {
     if (tool === 'rake') updateRake(dt);
+    else if (tool === 'blower') updateBlower(dt);
     else updatePicking(dt);
     if (dirty && now - lastSave > 10) saveNow();
   } else {
@@ -861,6 +913,12 @@ function frame(t) {
     rakeView.update(true, player, camera, h.d, h.lift, rakeSpan ?? { start: h.d, end: h.d - 0.6 });
     ui.crosshair(false, stroke ? Math.min(1, stroke.t / RAKE_STROKE.time) : null);
   } else rakeView.update(false);
+  if (tool === 'blower') {
+    if (state !== 'playing') spin = 0;
+    blowerView.update(true, player, camera, blowerStats(economy.blower), spin, now);
+    ui.crosshair(false, spin > 0 ? spin : null);
+  } else blowerView.update(false);
+  sound.blower(tool === 'blower' && state === 'playing' ? spin : 0);
   updateGateSigns();
   ground.update(now);
 
@@ -922,6 +980,12 @@ if (DEBUG) {
     selectTool(t) { selectTool(t); return tool; },
     buy(key) { buy(key); return economy.progress; },
     rakeOnce() { if (tool !== 'rake') return null; stroke = null; pickRequested = true; updateRake(0); return economy.sold; },
+    blowFor(sec) { // удерживать кнопку воздуходувки sec секунд игрового времени (такты без кадров)
+      if (tool !== 'blower') return null;
+      for (let t = 0; t < sec; t += BLOWER_STREAM.tick) { mouseHeld = true; updateBlower(BLOWER_STREAM.tick); }
+      mouseHeld = false;
+      return economy.sold;
+    },
     gate(k) { const g = level.gates[k]; return gateBlock(g) ?? (useGate(g), 'ok'); },
     level() { return level.id; },
     rakeSpan() { return rakeSpan; },

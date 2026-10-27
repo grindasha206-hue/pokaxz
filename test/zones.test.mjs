@@ -298,3 +298,95 @@ test('площадка у гаража: открывается наградой 
     assert.deepEqual(f.economy.progress.inlets, []);
   } finally { setLevel('yard'); }
 });
+
+test('воздуходувка гонит листья от игрока, не сквозь забор; без разгона не дует', async () => {
+  const { blowerStats, blowTick } = await import('../src/blower.js');
+  const { BLOWER, BLOWER_STREAM } = await import('../src/config.js');
+  setLevel('pool');
+  try {
+    const f = createGame().field;
+    const st = blowerStats({ width: 0, power: 0, accuracy: 0 });
+    assert.equal(st.width, BLOWER.branches.width.values[0]);
+    assert.equal(st.startup, 0.6);
+    const top = blowerStats({ width: 5, power: 4, accuracy: 4 });
+    assert.ok(top.range > st.range && top.speed > st.speed && top.spread < st.spread && top.startup === 0.2);
+    // у ковра у восточного забора, лицом на восток (к забору)
+    const p = { x: 28.0, z: -7.0, yaw: -Math.PI / 2 };
+    assert.equal(blowTick(f, p, st, 0, BLOWER_STREAM.tick, [], mulberry32(1)).moved.length, 0, 'без разгона струи нет');
+    let moved = 0;
+    for (let k = 0; k < 40; k++) {
+      const r = blowTick(f, p, st, 1, BLOWER_STREAM.tick, [], mulberry32(k));
+      for (const { i, fx } of r.moved) {
+        moved++;
+        assert.ok(f.x[i] < 30 - level.leafMargin + 1e-6, 'лист остался по эту сторону забора');
+        if (Math.abs(f.z[i] - p.z) < 0.2) assert.ok(f.x[i] >= fx - 0.02, 'лист летит от игрока');
+      }
+    }
+    assert.ok(moved > 50, `сдвинуто ${moved}`);
+  } finally { setLevel('yard'); }
+});
+
+test('воздуходувка загоняет листья в приёмник', async () => {
+  const { blowerStats, blowTick } = await import('../src/blower.js');
+  const { BLOWER_STREAM } = await import('../src/config.js');
+  setLevel('pool');
+  try {
+    const g = createGame(), f = g.field;
+    const n = level.inlets[1]; // скиммер
+    for (let k = 0; k < 30; k++) f.moveTo(k, n.x - 1.2 - (k % 5) * 0.03, n.z + (Math.floor(k / 5) - 2.5) * 0.04);
+    const st = blowerStats({ width: 0, power: 0, accuracy: 4 });
+    const p = { x: n.x - 1.75, z: n.z, yaw: -Math.PI / 2 }; // смотрит на восток, на скиммер; листья — у сопла
+    const sold = new Set();
+    for (let k = 0; k < 120; k++) {
+      const r = blowTick(f, p, st, 1, BLOWER_STREAM.tick, [n], mulberry32(k));
+      for (const a of r.absorbed) { g.economy.sellDirect(a.ids); a.ids.forEach((i) => sold.add(i)); }
+    }
+    let ours = 0;
+    for (let k = 0; k < 30; k++) if (sold.has(k)) ours++;
+    assert.ok(ours >= 24, `в скиммер попало ${ours} из 30`);
+    assert.equal(g.economy.sold, sold.size);
+  } finally { setLevel('yard'); }
+});
+
+test('покупка воздуходувки и её веток; приёмник можно купить и без граблей', () => {
+  const g = clearedYard(), e = g.economy;
+  // денег за двор на воздуходувку не хватает
+  assert.equal(e.canBuy('blower'), false);
+  assert.equal(e.offer('blower:power'), null, 'улучшения без воздуходувки не продаются');
+  // честно зарабатываем на неё: продаём листья сада
+  g.nextZone = 'garden';
+  const s0 = json(buildSave(g));
+  const h = inGarden(() => {
+    const k = createGame(s0);
+    const ids = []; for (let i = 0; i < k.field.count; i++) ids.push(i);
+    k.economy.sellDirect(ids); k.economy.checkRewards();
+    return k;
+  });
+  const m = h.economy;
+  assert.ok(m.buy('blower'));
+  assert.ok(m.blower && !m.rake);
+  assert.ok(m.offer('inlet:garden-b'), 'приёмник продаётся при одной воздуходувке');
+  const before = m.money;
+  assert.ok(m.buy('blower:accuracy'));
+  assert.equal(before - m.money, 100000);
+  assert.equal(m.blower.accuracy, 1);
+  assert.equal(spentTotal(m.progress), m.progress.earned - m.money);
+  const s = inGarden(() => json(buildSave(h)));
+  const k = inGarden(() => createGame(s));
+  assert.deepEqual(k.fixes, []);
+  assert.equal(k.economy.blower.accuracy, 1);
+});
+
+test('терраса с бассейном открывается наградой за площадку у гаража', () => {
+  assert.equal(zoneUnlocked({ bonuses: ['yard-100', 'garden-100'] }, 'pool'), false);
+  assert.equal(zoneUnlocked({ bonuses: ['court-100'] }, 'pool'), true);
+  const g = LEVELS.court.gates.find((x) => x.to === 'pool');
+  assert.equal(g.requires, 'court-100');
+  assert.ok(ARRIVALS['court>pool'] && ARRIVALS['pool>court']);
+  // в бассейн листья не попадают при генерации
+  setLevel('pool');
+  try {
+    const f = createGame().field, P = level.pool;
+    for (let i = 0; i < f.count; i++) assert.ok(!(f.x[i] > P.x0 && f.x[i] < P.x1 && f.z[i] > P.z0 && f.z[i] < P.z1), `лист ${i} в воде`);
+  } finally { setLevel('yard'); }
+});
