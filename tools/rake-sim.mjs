@@ -1,5 +1,5 @@
-// Замер скорости граблей на коде игры: прогон уборки сада ботом.
-// Запуск: node tools/rake-sim.mjs
+// Замер скорости граблей на коде игры: прогон уборки сада и площадки у гаража ботом.
+// Запуск: node tools/rake-sim.mjs [garden|court]
 //
 // Бот повторяет то, что делает игрок: выбирает ближайший лежащий лист, встаёт так, чтобы приёмник
 // оказался между листом и ним, и тянет кучу к себе взмахами, отступая после каждого на длину взмаха,
@@ -9,7 +9,7 @@
 // Время: ходьба PLAYER.walkSpeed, взмах RAKE_STROKE.time, подбор рукой — по таблице ловкости + 0,35 с прицела.
 
 import { PLAYER, RAKE, RAKE_STROKE, UPGRADES } from '../src/config.js';
-import { setLevel, level, isFree } from '../src/layout.js';
+import { setLevel, level, isFree, LEVELS } from '../src/layout.js';
 import { createGame } from '../src/game.js';
 import { ON_GROUND, mulberry32 } from '../src/leaves.js';
 import { rakeStats, strokeSpan, rakeStroke, activeInlets } from '../src/rake.js';
@@ -23,8 +23,9 @@ export function simulateRake({ zone = 'garden', rake = { handle: 0, sweep: 0, st
   const max = (b) => UPGRADES[b].prices.length;
   e.progress.upgrades = hand === 'max' ? { grab: max('grab'), speed: max('speed'), bag: max('bag') } : { grab: 0, speed: 0, bag: 0 };
   e.progress.tools.rake = { ...rake };
+  // inlets: 'all' — все приёмники зоны, 'first' — только первый (самый дешёвый), 'none' — без них
   e.progress.inlets = inlets === 'all' ? (level.inlets ?? []).map((n) => n.id) : [];
-  const ins = inlets === 'none' ? [] : activeInlets(e.progress);
+  const ins = inlets === 'none' ? [] : inlets === 'first' ? (level.inlets ?? []).slice(0, 1) : activeInlets(e.progress);
   const st = rakeStats(rake), span = strokeSpan(st, Infinity);
   const rng = mulberry32(seed);
   const p = { x: level.spawn.x, z: level.spawn.z, yaw: 0 };
@@ -106,16 +107,21 @@ export function simulateRake({ zone = 'garden', rake = { handle: 0, sweep: 0, st
 if (import.meta.url === `file://${process.argv[1]}`) {
   const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
   const B = RAKE.branches, top = { handle: B.handle.prices.length, sweep: B.sweep.prices.length, sticky: B.sticky.prices.length };
+  const mid = { handle: 2, sweep: 2, sticky: 2 }; // примерно столько улучшений покупается к концу сада
   const runs = [
     ['рука на максимуме, без граблей', { inlets: 'none' }],
-    ['грабли без улучшений, 1 приёмник', { inlets: 'free' }],
+    ['грабли без улучшений, 1 приёмник', { inlets: 'first' }],
     ['грабли без улучшений, 2 приёмника', {}],
+    ['грабли 2/2/2, 2 приёмника', { rake: mid }],
     ['грабли на максимуме, 2 приёмника', { rake: top }],
   ];
-  console.log(`Сад: 12 000 листьев. Время уборки всей зоны (рука — с прокачкой на максимуме, мешок 500).\n`);
-  for (const [name, o] of runs) {
-    const r = simulateRake(o);
-    console.log(`${name.padEnd(36)} ${fmt(r.t).padStart(6)}  ${(r.count / r.t).toFixed(1).padStart(5)} лист/с · ` +
-      `взмахов ${r.strokes}, в приёмники ${r.rakeSold}, рукой ${r.handLeaves} (${fmt(r.handTime)}, походов ${r.trips})`);
+  const zones = process.argv[2] ? [process.argv[2]] : ['garden', 'court'];
+  for (const zone of zones) {
+    console.log(`\n${LEVELS[zone].name}: ${LEVELS[zone].leafCount} листьев. Время уборки всей зоны (рука — с прокачкой на максимуме, мешок 500).`);
+    for (const [name, o] of runs) {
+      const r = simulateRake({ ...o, zone });
+      console.log(`${name.padEnd(36)} ${fmt(r.t).padStart(6)}  ${(r.count / r.t).toFixed(1).padStart(5)} лист/с · ` +
+        `взмахов ${r.strokes}, в приёмники ${r.rakeSold}, рукой ${r.handLeaves} (${fmt(r.handTime)}, походов ${r.trips})`);
+    }
   }
 }

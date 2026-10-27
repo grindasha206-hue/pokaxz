@@ -2,7 +2,7 @@
 // контейнер и приёмники листьев. Планировка — в layout.js (GARDEN).
 
 import * as THREE from '../../vendor/three.module.min.js';
-import { GARDEN, GZ, GARDEN_GATE } from '../layout.js';
+import { GARDEN, GZ, COURT_GATE } from '../layout.js';
 import { formatMoney } from '../config.js';
 import { mulberry32 } from '../leaves.js';
 import { signTexture } from './textures.js';
@@ -12,23 +12,15 @@ import { add, boxAt, lambert, pumpkin, buildContainer, buildFenceRuns, buildLatt
 export function buildGarden(scene, MAT, M = {}) {
   const G = GARDEN;
   const center = { x: (GZ.minX + GZ.maxX) / 2, z: (GZ.minZ + GZ.maxZ) / 2 };
-  const court = G.gates.find((g) => g.to === null);
-  const c0 = court.x - 0.75, c1 = court.x + 0.75;
+  const c0 = COURT_GATE.x0, c1 = COURT_GATE.x1;
   // западный забор — общий с двором (строится вместе с двором)
   buildFenceRuns(scene, MAT, [
     [GZ.minX, GZ.minZ, GZ.maxX, GZ.minZ],
     [GZ.maxX, GZ.minZ, GZ.maxX, GZ.maxZ],
     [GZ.minX, GZ.maxZ, c0, GZ.maxZ], [c1, GZ.maxZ, GZ.maxX, GZ.maxZ],
   ], center, { seed: 57 });
-  // ворота к площадке у гаража (следующая зона) — со стороны сада табличка
+  // ворота к площадке у гаража: лицевая табличка — в саду
   const courtGate = buildLatticeGate(scene, MAT, c0, GZ.maxZ + 0.02, c1, GZ.maxZ + 0.02, -1);
-  courtGate.setSign(['Площадка', 'у гаража', '— скоро']);
-  // табличка ворот во двор со стороны сада: на тех же воротах, что строит двор, — отдельная доска
-  const backSign = new THREE.MeshLambertMaterial({ map: signTexture(['Двор', 'F — пройти'], { size: 100 }) });
-  const bs = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.45), backSign);
-  bs.position.set(GZ.minX + 0.13, 0.8, (GARDEN_GATE.z0 + GARDEN_GATE.z1) / 2);
-  bs.rotation.y = Math.PI / 2;
-  scene.add(bs);
 
   buildShed(scene, MAT, G.shed);
   if (M.tree3) placeModel(scene, M.tree3, { x: G.tree.x, z: G.tree.z, height: 6.2, tint: '#c9772f', rotY: 2.2 });
@@ -92,7 +84,7 @@ function buildShed(scene, MAT, S) {
  * Приёмник: решётка в земле. Не купленный закрыт деревянной крышкой с колышком-табличкой
  * (цена — в блокноте). setOwned(true) открывает решётку.
  */
-function buildInlet(scene, MAT, n) {
+export function buildInlet(scene, MAT, n) {
   const g = new THREE.Group();
   g.position.set(n.x, 0, n.z);
   const ring = add(g, new THREE.TorusGeometry(n.r, 0.035, 8, 32), MAT.metal, 0, 0.012, 0, { cast: false });

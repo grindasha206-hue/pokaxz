@@ -435,8 +435,19 @@ function deposit() {
 }
 
 function zoneDoneText() {
-  return level.id === 'yard' ? 'Двор чист! Ворота в сад — в восточном заборе, <kbd>F</kbd> у ворот.'
+  const g = (level.gates ?? []).find((x) => x.requires === `${level.id}-100`);
+  return g?.to && LEVELS[g.to] ? `${level.name}: чисто! Открыта зона «${LEVELS[g.to].name}» — <kbd>F</kbd> у ворот.`
     : `${level.name}: чисто! Следующая зона появится в новой версии игры.`;
+}
+
+// таблички на воротах: куда ведут и открыты ли (зон, которых ещё нет, — «скоро»)
+const SOON = { pool: ['Терраса', 'с бассейном', '— скоро'] };
+function updateGateSigns() {
+  for (const [key, set] of Object.entries(world.gateSigns ?? {})) {
+    const [from, to] = key.split('>'), L = LEVELS[to];
+    if (!L) { set(SOON[to] ?? ['— скоро']); continue; }
+    set(zoneUnlocked(economy.progress, to) ? [L.signName, 'F — пройти'] : [L.signName, 'откроется после', `уборки ${LEVELS[from].genitive}`]);
+  }
 }
 
 const buyLock = new Map();
@@ -850,7 +861,7 @@ function frame(t) {
     rakeView.update(true, player, camera, h.d, h.lift, rakeSpan ?? { start: h.d, end: h.d - 0.6 });
     ui.crosshair(false, stroke ? Math.min(1, stroke.t / RAKE_STROKE.time) : null);
   } else rakeView.update(false);
-  world.gardenGate?.setSign(zoneUnlocked(economy.progress, 'garden') ? ['Сад', 'F — войти'] : ['Сад', 'откроется после', 'уборки двора']);
+  updateGateSigns();
   ground.update(now);
 
   // крышка контейнера и указатель

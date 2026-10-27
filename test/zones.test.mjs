@@ -258,3 +258,43 @@ test('все приёмники: цены по таблице и уникаль�
   assert.deepEqual(GARDEN.inlets.map((n) => n.price), [usd(0), usd(3)]);
   for (const id of ZONE_ORDER) assert.ok(LEVELS[id].rewards.length >= 2);
 });
+
+test('площадка у гаража: открывается наградой за весь сад, её приёмники продаются только после этого', () => {
+  const g = clearedYard();
+  const e = g.economy;
+  e.buy('rake');
+  assert.equal(zoneUnlocked(e.progress, 'court'), false);
+  assert.equal(e.offer('inlet:court-a'), null, 'приёмник закрытой зоны не продаётся');
+  // сад: всё продано через приёмник — награды сада выданы
+  g.nextZone = 'garden';
+  const s1 = json(buildSave(g));
+  const h = inGarden(() => {
+    const k = createGame(s1);
+    const ids = []; for (let i = 0; i < k.field.count; i++) ids.push(i);
+    k.economy.sellDirect(ids);
+    k.economy.checkRewards();
+    return k;
+  });
+  assert.ok(zoneUnlocked(h.economy.progress, 'court'));
+  assert.ok(h.economy.offer('inlet:court-a'), 'теперь продаётся');
+  assert.equal(h.economy.leafValue, LEAF_VALUE + 2 * LEAF_BONUS, 'бонусы двора и сада');
+  h.nextZone = 'court';
+  h.player = { ...ARRIVALS['garden>court'] };
+  const s2 = inGarden(() => json(buildSave(h)));
+  setLevel('court');
+  try {
+    const c = createGame(s2);
+    assert.deepEqual(c.fixes, []);
+    assert.equal(c.field.count, LEVELS.court.leafCount);
+    assert.equal(c.economy.money, h.economy.money);
+    assert.ok(c.economy.buy('inlet:court-a'));
+    const s3 = json(buildSave(c));
+    assert.deepEqual(createGame(s3).fixes, []);
+    // поддельный приёмник площадки при неубранном саде снимается
+    const fake = json(s1);
+    fake.progress.inlets = ['court-b'];
+    setLevel('garden');
+    const f = createGame(fake);
+    assert.deepEqual(f.economy.progress.inlets, []);
+  } finally { setLevel('yard'); }
+});

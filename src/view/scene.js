@@ -5,6 +5,7 @@ import * as THREE from '../../vendor/three.module.min.js';
 import { ZONE } from '../config.js';
 import { CONTAINER, SHOP, TREE, PORCH, PORCH_STEP, GARDEN_GATE, T as FENCE_T, FENCE_H, level } from '../layout.js';
 import { buildGarden } from './garden.js';
+import { buildCourt } from './court.js';
 import { mulberry32 } from '../leaves.js';
 import { grassTexture, plasterTexture, woodTexture, roofTexture, signTexture, boardTexture, barkTexture } from './textures.js';
 import { placeModel, worldUV } from './yardAssets.js';
@@ -73,10 +74,15 @@ export function buildWorld(scene, assets = { mats: {}, models: {} }, lvl = level
   const yardContainer = buildContainer(scene, MAT);
   refs.shop = buildShop(scene, MAT);
   const garden = buildGarden(scene, MAT, M);
-  refs.container = lvl.id === 'garden' ? garden.container : yardContainer;
-  refs.inlets = garden.inlets;
-  refs.courtGate = garden.courtGate;
-  refs.gardenGateBack = garden.yardGate;
+  const court = buildCourt(scene, MAT, M);
+  refs.container = { yard: yardContainer, garden: garden.container, court: court.container }[lvl.id] ?? yardContainer;
+  refs.inlets = new Map([...garden.inlets, ...court.inlets]);
+  // таблички ворот: «откуда>куда» — с той стороны, откуда к ним подходят
+  refs.gateSigns = {
+    'yard>garden': refs.gardenGate.setSign, 'garden>yard': refs.gardenGate.setBackSign,
+    'garden>court': garden.courtGate.setSign, 'court>garden': garden.courtGate.setBackSign,
+    'court>pool': court.poolGate.setSign,
+  };
   buildSurroundings(scene, MAT, M);
   return refs;
 }
@@ -305,23 +311,23 @@ export function buildLatticeGate(scene, MAT, x0, z0, x1, z1, side = 1) {
   add(g, new THREE.BoxGeometry(0.06, 0.07, glen), MAT.darkWood, 0, H, glen / 2);
   add(g, new THREE.BoxGeometry(0.06, 0.06, glen), MAT.darkWood, 0, gateLow, glen / 2);
   scene.add(g);
-  // табличка на воротах
-  const signMat = new THREE.MeshLambertMaterial();
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.55), signMat);
-  sign.position.set(side * (FENCE_T + 0.03), 0.8, glen / 2);
-  sign.rotation.y = side * Math.PI / 2;
-  g.add(sign);
-  let key = '';
-  return {
-    group: g,
-    setSign(lines) {
+  // таблички с обеих сторон ворот: side — лицевая (в зону, где ворота строятся), -side — обратная
+  const makeSign = (sd) => {
+    const mat = new THREE.MeshLambertMaterial();
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.55), mat);
+    sign.position.set(sd * (FENCE_T + 0.03), 0.8, glen / 2);
+    sign.rotation.y = sd * Math.PI / 2;
+    g.add(sign);
+    let key = '';
+    return (lines) => {
       if (lines.join('|') === key) return;
       key = lines.join('|');
-      signMat.map?.dispose();
-      signMat.map = signTexture(lines, { size: 100 });
-      signMat.needsUpdate = true;
-    },
+      mat.map?.dispose();
+      mat.map = signTexture(lines, { size: 100 });
+      mat.needsUpdate = true;
+    };
   };
+  return { group: g, setSign: makeSign(side), setBackSign: makeSign(-side) };
 }
 
 // ── дерево ────────────────────────────────────────────────────
@@ -582,12 +588,10 @@ function buildSurroundings(scene, MAT, M = {}) {
   house(9, 18.5, 7, 6, 4.8, Math.PI, '#ece3d2', '#8c4a3a');
   house(4, -24, 9, 7, 6.2, 0, '#e2d6c0', '#6d5a4e');               // за домом
   if (M.tree1 && M.tree3) {
-    // за забором — ещё три дерева: закрывают горизонт, но это не лес
-    placeModel(scene, M.tree3, { x: 12, z: 1.5, height: 5.8, tint: '#bc6c2f', rotY: 1.2 });
+    // за забором — ещё деревья: закрывают горизонт, но это не лес
     placeModel(scene, M.tree1, { x: -12, z: 4, height: 5.2, tint: '#bc6c2f', rotY: 2.5 });
     placeModel(scene, M.tree3, { x: 9.5, z: -13.5, height: 6, tint: '#c58b32', rotY: 4.0 });
   } else {
-    buildTree(scene, 12, 1.5, 1.05, 41);
     buildTree(scene, -12, 5, 1.0, 47);
   }
 

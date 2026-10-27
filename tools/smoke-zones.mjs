@@ -1,5 +1,5 @@
 // Сквозная проверка зон и граблей в браузере: двор убран → ворота в сад → покупка граблей →
-// взмахи над приёмником → сохранение и загрузка в саду → обратно во двор.
+// взмахи над приёмником → сохранение и загрузка в саду → сад убран → площадка у гаража → обратно во двор.
 // Запуск: python3 -m http.server 8080 & node tools/smoke-zones.mjs
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
@@ -109,6 +109,21 @@ assert.ok(Math.abs(after.x - before.x) < 0.002 && Math.abs(after.z - before.z) <
 assert.equal(after.sold, before.sold);
 assert.equal(after.money, before.money);
 assert.ok(after.rake, 'грабли сохранились');
+
+// сад убран → ворота на юг → площадка у гаража → обратно в сад
+await ev(() => { const d = window.__dvor; d.clearAll(); d.economy.checkRewards(); d.view(13.3, -0.3, Math.PI, 0); });
+const gardenMoney = await ev(() => window.__dvor.economy.money);
+await Promise.all([page.waitForNavigation(), ev(() => window.__dvor.gate(1))]);
+await ready();
+assert.equal(await ev(() => window.__dvor.level()), 'court', 'после южных ворот — площадка у гаража');
+assert.equal(await ev(() => window.__dvor.field.count), 16000);
+assert.equal(await ev(() => window.__dvor.economy.money), gardenMoney);
+assert.match(await ev(() => window.__dvor.gate(1)), /в следующей версии/, 'ворота к террасе пока закрыты');
+await ev(() => window.__dvor.view(13.3, 1.95, 0, 0));
+await Promise.all([page.waitForNavigation(), ev(() => window.__dvor.gate(0))]);
+await ready();
+assert.equal(await ev(() => window.__dvor.level()), 'garden');
+assert.equal(await ev(() => window.__dvor.economy.remaining), 0, 'сад остался убранным');
 
 // обратно во двор: двор по-прежнему убран
 await ev(() => window.__dvor.view(8.9, -1.8, Math.PI / 2, 0));

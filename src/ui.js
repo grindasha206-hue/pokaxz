@@ -2,7 +2,7 @@
 
 import { UPGRADES, BRANCHES, LOCKED_TOOLS, RAKE, RAKE_BRANCHES, formatMoney, formatGain, plural } from './config.js';
 import { level } from './layout.js';
-import { nextLevel, ALL_INLETS } from './economy.js';
+import { nextLevel, ALL_INLETS, zoneUnlocked } from './economy.js';
 
 const $ = (id) => document.getElementById(id);
 const RING_LEN = 40.84; // длина окружности кольца у точки (r = 6.5)
@@ -167,8 +167,8 @@ export class UI {
         }));
       }
     }
-    // приёмники: бесплатный работает сразу, платные покупаются после граблей
-    for (const n of ALL_INLETS) {
+    // приёмники открытых зон: бесплатный работает сразу, платные покупаются после граблей
+    for (const n of ALL_INLETS.filter((x) => zoneUnlocked(p, x.zone))) {
       const own = n.price === 0 || p.inlets.includes(n.id);
       const next = own ? null : economy.offer(`inlet:${n.id}`);
       const row = addRow({

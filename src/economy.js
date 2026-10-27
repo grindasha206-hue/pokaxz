@@ -15,7 +15,16 @@ export function newProgress() {
 }
 
 /** Все приёмники игры (для цен и проверки сохранения). */
-export const ALL_INLETS = ZONE_ORDER.flatMap((z) => LEVELS[z].inlets ?? []);
+export const ALL_INLETS = ZONE_ORDER.flatMap((z) => (LEVELS[z].inlets ?? []).map((n) => ({ ...n, zone: z })));
+
+/** Открыта ли зона: двор — всегда, следующая — когда получена награда за полную уборку предыдущей. */
+export function zoneUnlocked(progress, id) {
+  if (id === 'yard') return true;
+  for (const z of ZONE_ORDER) {
+    for (const g of LEVELS[z].gates ?? []) if (g.to === id && g.requires) return progress.bonuses.includes(g.requires);
+  }
+  return false;
+}
 /** Все награды всех зон, с id зоны. */
 export const ALL_REWARDS = ZONE_ORDER.flatMap((z) => (LEVELS[z].rewards ?? []).map((r) => ({ ...r, zone: z })));
 
@@ -182,7 +191,7 @@ export class Economy {
     }
     if (key.startsWith('inlet:')) {
       const n = ALL_INLETS.find((x) => x.id === key.slice(6));
-      if (!n || n.price === 0 || p.inlets.includes(n.id) || !p.tools.rake) return null;
+      if (!n || n.price === 0 || p.inlets.includes(n.id) || !p.tools.rake || !zoneUnlocked(p, n.zone)) return null;
       return { price: n.price, inlet: n };
     }
     return null;
@@ -246,6 +255,9 @@ export class Economy {
     });
     if (ok.length !== valid.length) fixes.push('bonuses');
     p.bonuses = ok;
+    // приёмник покупается только в открытой зоне
+    const inZone = p.inlets.filter((id) => zoneUnlocked(p, ALL_INLETS.find((n) => n.id === id).zone));
+    if (inZone.length !== p.inlets.length) { fixes.push('inlets in locked zone'); p.inlets = inZone; }
     // заработок — целое число в пределах, возможных при таком числе проданных листьев
     const sold = this.sold + this.otherSold;
     const lo = sold * LEAF_VALUE, hi = sold * (LEAF_VALUE + LEAF_BONUS * this.leafBonuses);

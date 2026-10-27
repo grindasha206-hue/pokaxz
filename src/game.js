@@ -4,7 +4,7 @@
 // активна одна — level (см. layout.setLevel). Деньги, покупки и награды общие.
 
 import { generateLeaves, SOLD, IN_BAG } from './leaves.js';
-import { Economy, newProgress, ALL_REWARDS } from './economy.js';
+import { Economy, newProgress, ALL_REWARDS, zoneUnlocked } from './economy.js';
 import { DEFAULT_SETTINGS, isLegacySave } from './save.js';
 import { level, LEVELS, ZONE_ORDER } from './layout.js';
 
@@ -77,14 +77,7 @@ export function createGame(save = null, opts = {}) {
   };
 }
 
-/** Открыта ли зона: двор — всегда, следующая — когда получена награда предыдущей за 100 %. */
-export function zoneUnlocked(progress, id) {
-  if (id === 'yard') return true;
-  for (const z of ZONE_ORDER) {
-    for (const g of LEVELS[z].gates ?? []) if (g.to === id && g.requires) return progress.bonuses.includes(g.requires);
-  }
-  return false;
-}
+export { zoneUnlocked };
 
 /** Есть ли в поле листья в мешке (переход между зонами только с пустым мешком). */
 export const bagEmpty = (field) => field.countState(IN_BAG) === 0;

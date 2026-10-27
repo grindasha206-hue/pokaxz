@@ -85,6 +85,7 @@ function yardDensity(x, z, noise, drift) {
 export const YARD = {
   id: 'yard',
   name: 'Двор',
+  signName: 'Двор', genitive: 'двора',
   leafCount: ZONE.leafCount,
   zone: ZONE,
   // награды зоны (как в Leaf it Alone): выдаются один раз и сохраняются
@@ -186,6 +187,8 @@ export const FRAGMENT = {
 // ── зона 2: сад за восточным забором ───────────────────────
 // Здесь покупаются и долго используются грабли: листья лежат плотным ковром (≈45 % площади),
 // их сгребают в приёмники. Двор к этому моменту убран полностью.
+// ворота из сада на юг, к площадке у гаража
+export const COURT_GATE = { x: 13.3, x0: 12.55, x1: 14.05 };
 export const GZ = { id: 'garden', name: 'Сад', leafCount: 12000, minX: ZONE.maxX, maxX: 18, minZ: ZONE.minZ, maxZ: 1 };
 export const GARDEN = (() => {
   const gate = (GARDEN_GATE.z0 + GARDEN_GATE.z1) / 2;
@@ -225,14 +228,15 @@ export const GARDEN = (() => {
     return d;
   };
   return {
-    id: GZ.id, name: GZ.name, leafCount: GZ.leafCount, zone: GZ,
+    id: GZ.id, name: GZ.name, leafCount: GZ.leafCount, zone: GZ, signName: 'Сад', genitive: 'сада',
     rewards: [
       { id: 'garden-50', at: 0.5, leafBonus: 1, text: 'цена листа +25 %' },
-      { id: 'garden-100', at: 1, leafBonus: 0, text: 'площадка у гаража откроется в следующей версии' },
+      { id: 'garden-100', at: 1, leafBonus: 0, text: 'открыта площадка у гаража — ворота в южном заборе' },
     ],
     gates: [
       { to: 'yard', x: GZ.minX + 0.45, z: gate, requires: null },
-      { to: null, x: 13.3, z: GZ.maxZ - 0.45, requires: 'garden-100', locked: 'Площадка у гаража — в следующей версии' },
+      { to: 'court', x: COURT_GATE.x, z: GZ.maxZ - 0.45, requires: 'garden-100',
+        locked: 'Площадка у гаража откроется, когда сад будет убран полностью' },
     ],
     inset: 0,
     obstacles,
@@ -248,15 +252,93 @@ export const GARDEN = (() => {
     leafSize: 1.12,
   };
 })();
+
+// ── зона 3: площадка у гаража, южнее сада ───────────────────
+// Бетонная площадка перед гаражом, баскетбольное кольцо, качели за гаражом, дерево у забора.
+// Грабли здесь докачиваются до конца; оба приёмника платные ($3 и $6 по таблице).
+export const CZ = { id: 'court', name: 'Площадка у гаража', leafCount: 16000, minX: ZONE.maxX, maxX: 18, minZ: GZ.maxZ, maxZ: 11.2 };
+// ворота из площадки на восток — к террасе с бассейном (следующая зона)
+export const POOL_GATE = { x: CZ.maxX, z0: 1.6, z1: 3.1 };
+export const COURT = (() => {
+  const container = { x: 10.4, z: CZ.minZ + 0.72, w: 1.3, d: 1.0, h: 1.05, rotY: 0 }; // табличкой на юг, к площадке
+  const garage = { x0: 14.6, x1: CZ.maxX - T, z0: 3.8, z1: 7.6, h: 3.2 };
+  const pad = { x0: 10.4, x1: garage.x0, z0: 3.4, z1: 8.0 };           // бетон перед воротами гаража
+  const hoop = { x: pad.x0 + 0.25, z: 5.7, r: 0.1 };                     // баскетбольное кольцо
+  const swings = { x0: 15.0, x1: 17.6, z0: 9.4, z1: 10.5, h: 2.2 };      // качели за гаражом
+  const tree = { x: 9.7, z: 9.3, r: 0.32 };
+  const bushes = [[12.4, 10.65, 0.45], [11.25, 10.72, 0.38], [8.55, 6.6, 0.42]];
+  const inlets = [
+    { id: 'court-a', name: 'Приёмник на площадке', x: 12.3, z: 5.7, r: 0.42, price: usd(3) },
+    { id: 'court-b', name: 'Приёмник у качелей', x: 14.2, z: 9.1, r: 0.42, price: usd(6) },
+  ];
+  const obstacles = [
+    box('fence-w', CZ.minX - T, CZ.minX + T, CZ.minZ, CZ.maxZ, FENCE_H),
+    box('fence-n', CZ.minX, CZ.maxX + T, CZ.minZ - T, CZ.minZ + T, FENCE_H),
+    box('fence-e', CZ.maxX - T, CZ.maxX + T, CZ.minZ, CZ.maxZ, FENCE_H),
+    box('fence-s', CZ.minX, CZ.maxX + T, CZ.maxZ - T, CZ.maxZ + T, FENCE_H),
+    box('container', container.x - container.w / 2, container.x + container.w / 2, container.z - container.d / 2, container.z + container.d / 2, container.h),
+    box('garage', garage.x0, garage.x1, garage.z0, garage.z1, garage.h),
+    box('swings', swings.x0, swings.x1, swings.z0, swings.z1, swings.h),
+    circle('hoop', hoop.x, hoop.z, hoop.r, 3.05),
+    circle('tree', tree.x, tree.z, tree.r, 8),
+    ...bushes.map(([x, z, r], k) => circle(`bush-${k}`, x, z, r, 1.0)),
+  ];
+  const onPad = (x, z) => x >= pad.x0 && x <= pad.x1 && z >= pad.z0 && z <= pad.z1;
+  const gate = COURT_GATE.x;
+  // ковры: у заборов, у стен гаража, под деревом, наносы; на бетоне реже, у приёмников и контейнера чище
+  const density = (x, z, noise, drift) => {
+    const toFence = Math.min(x - CZ.minX, CZ.maxX - x, CZ.maxZ - z, z - CZ.minZ);
+    const toGarage = Math.hypot(Math.max(garage.x0 - x, 0, x - garage.x1), Math.max(garage.z0 - z, 0, z - garage.z1));
+    let d = 0.03;
+    d += 1.5 * Math.exp(-((toFence / 1.0) ** 2));
+    d += 1.3 * Math.exp(-((toGarage / 0.7) ** 2));
+    d += 2.6 * Math.exp(-((Math.hypot(x - tree.x, z - tree.z) / 2.3) ** 2));
+    for (const [cx, cz, r] of drift) d += 2.3 * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) / (r * r * 1.6));
+    d *= 0.5 + noise(x * 0.6, z * 0.6);
+    d = d ** 2;
+    if (onPad(x, z)) d *= 0.55;
+    for (const i of inlets) if (Math.hypot(x - i.x, z - i.z) < i.r + 0.5) d *= 0.05;
+    if (Math.hypot(x - container.x, z - container.z) < 1.4) d *= 0.3;
+    if (Math.hypot(x - gate, z - CZ.minZ) < 1.2) d *= 0.3;
+    return d;
+  };
+  return {
+    id: CZ.id, name: CZ.name, leafCount: CZ.leafCount, zone: CZ, signName: 'Площадка', genitive: 'площадки',
+    rewards: [
+      { id: 'court-50', at: 0.5, leafBonus: 1, text: 'цена листа +25 %' },
+      { id: 'court-100', at: 1, leafBonus: 0, text: 'терраса с бассейном откроется в следующей версии' },
+    ],
+    gates: [
+      { to: 'garden', x: gate, z: CZ.minZ + 0.45, requires: null },
+      { to: null, x: CZ.maxX - 0.45, z: (POOL_GATE.z0 + POOL_GATE.z1) / 2, requires: 'court-100',
+        locked: 'Терраса с бассейном — в следующей версии' },
+    ],
+    inset: 0,
+    obstacles,
+    spawn: { x: gate, z: CZ.minZ + 0.95, yaw: Math.PI },
+    container, shop: null, garage, pad, hoop, swings, tree, bushes, inlets,
+    surface: () => 0,
+    onPath: onPad,
+    density,
+    maxDensity: 14,
+    drifts: 8,
+    starter: null,
+    leafMargin: 0.08,
+    leafSize: 1.12,
+  };
+})();
+
 // где появляется игрок, входя в зону из другой (у ворот)
 export const ARRIVALS = {
   'yard>garden': GARDEN.spawn,
   'garden>yard': { x: ZONE.maxX - 0.9, z: (GARDEN_GATE.z0 + GARDEN_GATE.z1) / 2, yaw: Math.PI / 2 },
+  'garden>court': COURT.spawn,
+  'court>garden': { x: COURT_GATE.x, z: GZ.maxZ - 0.75, yaw: 0 },
 };
 
-export const LEVELS = { yard: YARD, garden: GARDEN, fragment: FRAGMENT };
+export const LEVELS = { yard: YARD, garden: GARDEN, court: COURT, fragment: FRAGMENT };
 /** Зоны игры по порядку (фрагмент — отдельный режим проверки, не зона). */
-export const ZONE_ORDER = ['yard', 'garden'];
+export const ZONE_ORDER = ['yard', 'garden', 'court'];
 
 export let level = YARD;
 export function setLevel(l) { level = typeof l === 'string' ? LEVELS[l] : l; }
